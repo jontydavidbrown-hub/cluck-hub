@@ -1,6 +1,7 @@
 
 import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import { useState } from 'react'
+import { NavLink } from "react-router-dom"
 
 const links = [
   { to: '/', label: 'Dashboard' },
@@ -9,6 +10,7 @@ const links = [
   { to: '/feed-silos', label: 'Feed & Silos' },
   { to: '/reminders', label: 'Reminders' },
   { to: '/setup', label: 'Setup' },
+  { to: '/user', label: 'User' },
 ]
 
 export default function App() {
