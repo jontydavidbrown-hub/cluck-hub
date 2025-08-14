@@ -10,7 +10,6 @@ const links = [
   { to: '/feed-silos', label: 'Feed & Silos' },
   { to: '/reminders', label: 'Reminders' },
   { to: '/setup', label: 'Setup' },
-  { to: '/user', label: 'User' },
 ]
 
 export default function App() {
