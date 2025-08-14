@@ -1,5 +1,6 @@
 // src/main.tsx
 import React from "react";
+import User from "./pages/User"
 import { StrictMode } from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
@@ -48,6 +49,9 @@ const router = createBrowserRouter([
       { path: "feed-silos", element: <FeedSilos /> },
       { path: "reminders", element: <Reminders /> },
       { path: "setup", element: <Setup /> },
+      { path: "/user", element: <User /> },
+
+      
 
       // (Optional) Catch-all for unknown routes
       {
