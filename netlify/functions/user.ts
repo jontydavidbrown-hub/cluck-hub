@@ -12,7 +12,7 @@ type Profile = {
 
 const COOKIE_NAME = 'cluckhub_session'
 
-// --- dynamic import to avoid ESM/CJS issues like in auth.ts ---
+// dynamic import avoids ESM/CJS bundling issues
 async function getBlobs() {
   return await import('@netlify/blobs')
 }
@@ -98,11 +98,12 @@ export const handler: Handler = async (event) => {
     if (action === 'get') {
       const data = (await store.get(key, { type: 'json' })) as Profile | null
       if (data) return json(200, data)
-      // default
+      // default profile on first load
       const profile: Profile = {
         email,
         displayName: email.split('@')[0],
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+        timezone:
+          Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
         marketingOptIn: false,
         updatedAt: new Date().toISOString(),
       }
@@ -112,15 +113,11 @@ export const handler: Handler = async (event) => {
 
     if (action === 'update' && event.httpMethod === 'POST') {
       const body = JSON.parse(event.body || '{}')
-      // only allow these fields to be updated
-      const safe: Omit<Profile, 'email' | 'updatedAt'> = {
+      const updated: Profile = {
+        email,
         displayName: String(body.displayName ?? '').slice(0, 80),
         timezone: String(body.timezone ?? 'UTC').slice(0, 64),
         marketingOptIn: Boolean(body.marketingOptIn),
-      }
-      const updated: Profile = {
-        email,
-        ...safe,
         updatedAt: new Date().toISOString(),
       }
       await store.setJSON(key, updated)
