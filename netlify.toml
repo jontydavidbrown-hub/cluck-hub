@@ -3,6 +3,9 @@
   publish = "dist"
   functions = "netlify/functions"
 
+[build.environment]
+  SECRETS_SCAN_OMIT_KEYS = "BLOB_STORE"
+
 [functions]
   node_bundler = "esbuild"
   external_node_modules = ["@netlify/blobs","bcryptjs","jsonwebtoken"]
