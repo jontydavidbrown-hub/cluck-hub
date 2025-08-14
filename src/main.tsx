@@ -1,35 +1,28 @@
-// src/main.tsx (createBrowserRouter variant)
+// src/main.tsx
 import { StrictMode } from "react"
 import ReactDOM from "react-dom/client"
-import { createBrowserRouter, RouterProvider } from "react-router-dom"
-import "./index.css";
-import App from "./App"
-import User from "./pages/User"
+import { BrowserRouter, Routes, Route } from "react-router-dom"
+import "./index.css"
 
-// TODO: import your other pages here
-// import Dashboard from "./pages/Dashboard"
-// import Setup from "./pages/Setup"
-// etc.
-
-const router = createBrowserRouter([
-  {
-    path: "/",
-    element: <App />,
-    // If your App renders an <Outlet/>, use children:
-    children: [
-      // existing child routes:
-      // { path: "", element: <Dashboard /> },
-      // { path: "setup", element: <Setup /> },
-
-      // NEW user route (child of "/")
-      { path: "user", element: <User /> },
-    ],
-  },
-  // If you have any top-level routes (not under App), keep them here.
-])
+import App from "./App"               // your shell/landing if you use it as a page
+import User from "./pages/User"       // the new page
+// Import your existing pages below:
+import Dashboard from "./pages/Dashboard"      // adjust path/name if different
+// import Setup from "./pages/Setup"           // example
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <RouterProvider router={router} />
+    <BrowserRouter>
+      <Routes>
+        {/* Top-level routes */}
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/user" element={<User />} />
+        {/* Keep your other tabs here as needed */}
+        {/* <Route path="/setup" element={<Setup />} /> */}
+        {/* If you want App as a separate page, keep this too: */}
+        {/* <Route path="/home" element={<App />} /> */}
+        <Route path="*" element={<div style={{padding:16}}>404 Not Found</div>} />
+      </Routes>
+    </BrowserRouter>
   </StrictMode>
 )
