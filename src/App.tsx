@@ -2,42 +2,52 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
-// Optional: import your app-wide styles if they live here (usually in main.tsx)
-// import "./index.css";
-
 export default function App() {
   const { pathname } = useLocation();
-  const [open, setOpen] = useState(false); // if you have a collapsible sidebar; remove if unused
+  const [open, setOpen] = useState(false);
 
   return (
-    <div className="app-shell" data-path={pathname} style={{ display: "flex", minHeight: "100vh" }}>
-      {/* Sidebar / Tabs */}
-      <aside
-        className="sidebar"
-        style={{
-          width: 240,
-          padding: 16,
-          borderRight: "1px solid #eee",
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-        }}
-      >
-        <div style={{ fontWeight: 700, marginBottom: 8 }}>Cluck Hub</div>
-        <nav className="tabs" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <NavLink to="/" end>Dashboard</NavLink>
-          <NavLink to="/user">User</NavLink>
-          {/* Add your other tabs here, e.g.: */}
-          {/* <NavLink to="/setup">Setup</NavLink> */}
-          {/* <NavLink to="/reports">Reports</NavLink> */}
+    <div className="app-container">
+      {/* Sidebar */}
+      <aside className={`sidebar ${open ? "open" : ""}`}>
+        <div className="sidebar-header">
+          <h1 className="logo">Cluck Hub</h1>
+          <button
+            className="sidebar-toggle"
+            onClick={() => setOpen((prev) => !prev)}
+          >
+            ☰
+          </button>
+        </div>
+
+        <nav className="sidebar-nav">
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) =>
+              `nav-item ${isActive ? "active" : ""}`
+            }
+          >
+            Dashboard
+          </NavLink>
+          <NavLink
+            to="/user"
+            className={({ isActive }) =>
+              `nav-item ${isActive ? "active" : ""}`
+            }
+          >
+            User
+          </NavLink>
+          {/* Uncomment/add your real pages here */}
+          {/* <NavLink to="/setup" className="nav-item">Setup</NavLink> */}
+          {/* <NavLink to="/reports" className="nav-item">Reports</NavLink> */}
+          {/* <NavLink to="/jobs" className="nav-item">Jobs</NavLink> */}
         </nav>
-        {/* If you truly use `open`, add a toggle button; otherwise remove state above */}
-        {/* <button onClick={() => setOpen(o => !o)}>{open ? "Close" : "Open"} menu</button> */}
       </aside>
 
-      {/* Main content area */}
-      <main className="content" style={{ flex: 1, padding: 16 }}>
-        {/* Child routes render right here */}
+      {/* Main content */}
+      <main className="content">
+        {/* This is where your page content will load */}
         <Outlet />
       </main>
     </div>
