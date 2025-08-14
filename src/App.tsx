@@ -1,8 +1,30 @@
 
 import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import { useState } from 'react'
-import { NavLink } from "react-router-dom"
+// src/App.tsx
+import { NavLink, Outlet } from "react-router-dom"
 
+export default function App() {
+  return (
+    <div className="app-shell">
+      {/* Your sidebar/tabs */}
+      <aside className="sidebar">
+        <nav className="tabs">
+          <NavLink to="/" end>Dashboard</NavLink>
+          <NavLink to="/user">User</NavLink>
+          {/* add other tabs here to match child routes */}
+          {/* <NavLink to="/setup">Setup</NavLink> */}
+          {/* <NavLink to="/reports">Reports</NavLink> */}
+        </nav>
+      </aside>
+
+      {/* Main content area where child routes render */}
+      <main className="content">
+        <Outlet />
+      </main>
+    </div>
+  )
+}
 const links = [
   { to: '/', label: 'Dashboard' },
   { to: '/daily-log', label: 'Daily Log' },
