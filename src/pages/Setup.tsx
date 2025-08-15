@@ -1,28 +1,25 @@
 import { useServerState } from "../lib/serverState";
 import { useState } from "react";
 
-type Shed = { id: string; name: string; placedDate?: string | null; initialCount?: number | null };
+type Shed = { id: string; name: string };
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
-function todayISO() {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export default function Setup() {
   const { state: sheds, setState: setSheds, loading, synced } =
-    useServerState<Shed[]>("setup.sheds", []);
+    useServerState<Shed[]>("sheds", []);
 
-  const [form, setForm] = useState<Shed>({ id: "", name: "", placedDate: todayISO(), initialCount: null });
+  const [name, setName] = useState("");
 
   function add() {
-    if (!form.name) return;
-    setSheds([...sheds, { ...form, id: uid() }]);
-    setForm({ id: "", name: "", placedDate: todayISO(), initialCount: null });
+    if (!name.trim()) return;
+    setSheds([...sheds, { id: uid(), name: name.trim() }]);
+    setName("");
   }
   function remove(id: string) {
-    setSheds(sheds.filter(s => s.id !== id));
+    setSheds(sheds.filter((s) => s.id !== id));
   }
 
   return (
@@ -39,42 +36,20 @@ export default function Setup() {
       <div className="grid gap-3 md:grid-cols-4 bg-white p-4 border rounded-xl">
         <input
           placeholder="Shed name"
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-          className="border rounded p-2"
-        />
-        <input
-          type="date"
-          value={form.placedDate ?? ""}
-          onChange={(e) => setForm({ ...form, placedDate: e.target.value })}
-          className="border rounded p-2"
-        />
-        <input
-          placeholder="Initial count"
-          type="number"
-          value={form.initialCount ?? ""}
-          onChange={(e) =>
-            setForm({ ...form, initialCount: e.target.value ? Number(e.target.value) : null })
-          }
-          className="border rounded p-2"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="border rounded p-2 md:col-span-3"
         />
         <button onClick={add} className="rounded-lg bg-slate-900 text-white px-3 py-2">
-          Add
+          Add Shed
         </button>
       </div>
 
       <div className="bg-white border rounded-xl divide-y">
         {sheds.map((s) => (
           <div key={s.id} className="p-4 flex items-center justify-between">
-            <div>
-              <div className="font-medium">{s.name}</div>
-              <div className="text-xs text-slate-500">
-                Placed: {s.placedDate || "-"} · Initial Count: {s.initialCount ?? "-"}
-              </div>
-            </div>
-            <button onClick={() => remove(s.id)} className="text-red-600 hover:underline">
-              remove
-            </button>
+            <div className="font-medium">{s.name}</div>
+            <button onClick={() => remove(s.id)} className="text-red-600 hover:underline">remove</button>
           </div>
         ))}
         {!sheds.length && <div className="p-6 text-slate-500">No sheds yet. Add one above.</div>}
