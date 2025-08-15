@@ -23,8 +23,8 @@ export type ServerState = {
   [key: string]: any;
 };
 
-// bump key to invalidate any lingering bad data
-const STORAGE_KEY = "cluckhub:state:v3";
+// bump key again to ditch any stubborn old cache
+const STORAGE_KEY = "cluckhub:state:v4";
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -36,49 +36,36 @@ function asArray<T = any>(v: any): T[] {
   return Array.isArray(v) ? v : [];
 }
 
-/**
- * Create an "array facade": an object that walks/talks like an array
- * (map/filter/reduce/spread/for..of/length), backed by the given value,
- * but safely falls back to [] when value isn’t an array.
- */
 function arrayFacade<T = any>(v: any): T[] {
   const base = asArray<T>(v);
-  // If already a real array, just return it for max perf
-  if (Array.isArray(v)) return v;
+  if (Array.isArray(v)) return v; // already real array
 
-  // Minimal facade that covers common ops used in the app
+  // Lightweight facade that behaves like an array when called
   const facade: any = {
-    get length() {
-      return base.length;
-    },
+    get length() { return base.length; },
     at: (i: number) => base.at(i),
-    slice: (...args: any[]) => base.slice(...args),
-    map: (...args: any[]) => base.map(...args),
-    filter: (...args: any[]) => base.filter(...args),
-    reduce: (...args: any[]) => (base as any).reduce(...args),
-    some: (...args: any[]) => base.some(...args),
-    every: (...args: any[]) => base.every(...args),
-    forEach: (...args: any[]) => base.forEach(...args),
-    [Symbol.iterator]: function* () {
-      yield* base;
-    },
-    // spread support: [...facade] works because of iterator
-    // index access fallback:
-    // NOTE: TS can’t type this nicely; at runtime it’s fine.
+    slice: (...a: any[]) => base.slice(...a),
+    map: (...a: any[]) => base.map(...a),
+    filter: (...a: any[]) => base.filter(...a),
+    reduce: (...a: any[]) => (base as any).reduce(...a),
+    some: (...a: any[]) => base.some(...a),
+    every: (...a: any[]) => base.every(...a),
+    forEach: (...a: any[]) => base.forEach(...a),
+    [Symbol.iterator]: function* () { yield* base; },
   };
 
   return new Proxy(facade, {
-    get(target, prop, recv) {
-      if (typeof prop === "string" && /^\d+$/.test(prop)) {
-        return base[Number(prop)];
-      }
-      return Reflect.get(target, prop, recv);
+    get(_t, prop, _r) {
+      if (typeof prop === "string" && /^\d+$/.test(prop)) return base[Number(prop)];
+      // methods/props fall back to base (length, map, etc.)
+      const val = (base as any)[prop as any];
+      return typeof val === "function" ? val.bind(base) : val;
     },
     ownKeys() {
-      // make Object.keys([...]) reasonable
-      return Array.from({ length: base.length }, (_, i) => String(i));
+      return Array.from({ length: base.length }, (_, i) => String(i)).concat("length");
     },
     getOwnPropertyDescriptor(_t, prop) {
+      if (prop === "length") return { configurable: true, enumerable: false, writable: false, value: base.length };
       if (typeof prop === "string" && /^\d+$/.test(prop)) {
         return { configurable: true, enumerable: true, writable: false, value: base[Number(prop)] };
       }
@@ -107,9 +94,7 @@ function loadAndSanitize(): ServerState {
         if (parsed && typeof parsed === "object") s = parsed;
       }
     }
-  } catch {
-    // ignore bad JSON
-  }
+  } catch {}
   return normalizeWholeState(s);
 }
 
@@ -121,9 +106,7 @@ function persist(next: ServerState) {
   } catch {}
 }
 
-function emit() {
-  for (const l of Array.from(listeners)) l();
-}
+function emit() { for (const l of Array.from(listeners)) l(); }
 
 export function subscribe(cb: Listener) {
   listeners.add(cb);
@@ -150,14 +133,17 @@ export function setState(
   emit();
 }
 
-/* ---------------- React hook (hybrid API) ---------------- */
-
+/* ---------------- React hook (triple-mode return) ---------------- */
 /**
- * Overloads:
- * 1) useServerState((s) => slice) -> T
- * 2) useServerState("key", initial) -> object that is ALSO iterable:
- *    const { state, setState } = useServerState("k", init)
- *    const [value, setValue]   = useServerState("k", init)
+ * Modes supported:
+ *  1) useServerState((s) => slice) -> T
+ *  2) const { state, setState } = useServerState("key", init)
+ *  3) const [value, setValue]    = useServerState("key", init)
+ *
+ * Additionally, for array-shaped keys (like "sheds"), the returned object
+ * also behaves like an array if you call `.map` on it directly.
+ *    const sheds = useServerState("sheds", []);
+ *    sheds.map(...)  // ✅ works
  */
 export function useServerState<T>(selector: (s: ServerState) => T): T;
 export function useServerState<T>(key: string, initialValue: T): {
@@ -173,22 +159,19 @@ export function useServerState<T>(arg1: any, arg2?: any): any {
 
   if (isSelector) {
     const selector = arg1 as (s: ServerState) => T;
-    let res = selector(view);
-    // If a known array slice is returned (common case: s => s.sheds), wrap it
-    // Note: we can’t easily detect the key from a selector, so we only coerce if it *looks* array-like
-    if (!Array.isArray(res) && (res as any)?.map === undefined) {
-      // leave non-arrays alone; pages should handle their own shapes
+    try {
+      return selector(view);
+    } catch {
+      return undefined as unknown as T;
     }
-    return res;
   }
 
   const key = String(arg1) as keyof ServerState;
   const initialValue = arg2 as T;
-
-  // Coerce array-like slices to safe facades
-  let value: any = (view as any)[key];
   const shouldBeArray = ARRAY_KEYS.has(key as string) || Array.isArray(initialValue);
-  if (shouldBeArray) value = arrayFacade(value);
+
+  const raw = (view as any)[key];
+  const arr = shouldBeArray ? arrayFacade(raw) : raw;
 
   const setter = (next: T | ((prev: T) => T)) => {
     setState((s) => {
@@ -202,20 +185,49 @@ export function useServerState<T>(arg1: any, arg2?: any): any {
     });
   };
 
-  const obj: any = {
-    state: value as T,
+  // Create a proxy that:
+  // - exposes { state, setState, loading, synced }
+  // - supports [value, setValue] via iterator
+  // - and forwards array methods (map/filter/etc.) to arr when needed
+  const base: any = {
+    state: arr as T,
     setState: setter,
     loading: false,
     synced: true,
   };
-  obj[0] = obj.state;
-  obj[1] = obj.setState;
-  obj.length = 2;
-  obj[Symbol.iterator] = function* () {
-    yield obj.state;
-    yield obj.setState;
-  };
-  return obj;
+  base[0] = base.state;
+  base[1] = base.setState;
+  base.length = 2;
+  base[Symbol.iterator] = function* () { yield base.state; yield base.setState; };
+
+  return new Proxy(base, {
+    get(target, prop, recv) {
+      if (prop in target) return Reflect.get(target, prop, recv);
+      if (shouldBeArray) {
+        const val = (arr as any)[prop as any];
+        return typeof val === "function" ? val.bind(arr) : val;
+      }
+      return undefined;
+    },
+    has(target, prop) {
+      return prop in target || (shouldBeArray && prop in (arr as any));
+    },
+    ownKeys(target) {
+      if (!shouldBeArray) return Reflect.ownKeys(target);
+      const arrKeys = Array.from({ length: (arr as any).length }, (_, i) => String(i));
+      return Array.from(new Set([...Reflect.ownKeys(target), ...arrKeys, "length"]));
+    },
+    getOwnPropertyDescriptor(target, prop) {
+      if (prop in target) return Object.getOwnPropertyDescriptor(target, prop as any);
+      if (shouldBeArray) {
+        if (prop === "length") return { configurable: true, enumerable: false, writable: false, value: (arr as any).length };
+        if (typeof prop === "string" && /^\d+$/.test(prop)) {
+          return { configurable: true, enumerable: true, writable: false, value: (arr as any)[Number(prop)] };
+        }
+      }
+      return undefined;
+    },
+  });
 }
 
 /* convenience helpers */
