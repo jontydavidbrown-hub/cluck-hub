@@ -14,25 +14,29 @@ import Analytics from "./pages/Analytics";
 import Members from "./pages/Members";
 import { FarmProvider } from "./lib/FarmContext";
 import ErrorBoundary from "./ErrorBoundary";
-import "./index.css";
 
 const router = createBrowserRouter([
   {
     path: "/",
     element: <App />,
+    errorElement: (
+      <ErrorBoundary>
+        <div className="p-4">Something went wrong.</div>
+      </ErrorBoundary>
+    ),
     children: [
       { index: true, element: <Dashboard /> },
-      { path: "daily-log", element: <DailyLog /> },
+      { path: "daily", element: <DailyLog /> },
       { path: "weights", element: <Weights /> },
-      { path: "feed-silos", element: <FeedSilos /> },
+      { path: "feed", element: <FeedSilos /> },
       { path: "water", element: <Water /> },
       { path: "reminders", element: <Reminders /> },
       { path: "setup", element: <Setup /> },
       { path: "analytics", element: <Analytics /> },
       { path: "members", element: <Members /> },
-      { path: "user", element: <User /> }
-    ]
-  }
+      { path: "user", element: <User /> },
+    ],
+  },
 ]);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -44,4 +48,3 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </FarmProvider>
   </React.StrictMode>
 );
- 
