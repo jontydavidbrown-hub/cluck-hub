@@ -33,7 +33,7 @@ export default function User() {
             sess?.session?.user?.email ??
             sess?.identity?.email ??
             null;
-          if (alive) setEmail(typeof em === "string" ? em : null);
+          if (alive) setEmail(typeof em === "string" && em.length ? em : null);
         } else if (alive) {
           setEmail(null);
         }
@@ -67,12 +67,7 @@ export default function User() {
       setSaving(true);
       setSynced(null);
       setError(null);
-      const body = {
-        ...profile, // preserve unknown keys
-        displayName,
-        phone,
-        notes,
-      };
+      const body = { ...profile, displayName, phone, notes }; // preserve unknown keys
       const res = await fetch("/.netlify/functions/user", {
         method: "POST",
         credentials: "include",
@@ -100,7 +95,7 @@ export default function User() {
         credentials: "include",
       });
     } catch {}
-    // Ensure the login lightbox reappears on the next screen
+    // Ensure the login lightbox reappears
     localStorage.setItem("forceLogin", "1");
     window.location.href = "/";
   }
@@ -126,9 +121,7 @@ export default function User() {
             <div className="text-sm text-slate-600">
               <b>Status:</b>{" "}
               {email ? (
-                <span>
-                  Signed in as <span className="font-medium">{email}</span>
-                </span>
+                <span>Signed in as <span className="font-medium">{email}</span></span>
               ) : (
                 <span className="text-red-600">Not signed in</span>
               )}
