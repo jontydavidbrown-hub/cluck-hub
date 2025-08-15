@@ -20,8 +20,10 @@ export default function Setup() {
   const { state: shedsRaw, setState: setSheds, loading, synced } =
     useServerState<any>("sheds", []);
   // settings (batch length already added previously)
-  const { state: settings, setState: setSettings } =
-    useServerState<Settings>("settings", { batchLengthDays: 49 });
+  const { state: settingsRaw, setState: setSettings } =
+    useServerState<Settings>("settings", DEFAULT_SETTINGS);
+
+  const settings = normalizeSettings(settingsRaw);
 
   // migrate legacy string[] -> Shed[]
   useEffect(() => {
