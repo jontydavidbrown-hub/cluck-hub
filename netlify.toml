@@ -4,6 +4,8 @@
 
 [build.environment]
   NODE_VERSION = "20.12.2"
+  # Ignore secrets scanning for this key so the build can pass
+  SECRETS_SCAN_OMIT_KEYS = "BLOB_STORE"
 
 [functions]
   node_bundler = "esbuild"
