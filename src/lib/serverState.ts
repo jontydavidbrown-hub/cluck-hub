@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useSyncExternalStore } from "react";
 import { DEFAULT_SETTINGS, normalizeSettings, type AppSettings } from "./defaults";
 
@@ -6,11 +6,15 @@ export type ServerState = {
   settings: AppSettings;
   user?: { email: string } | null;
   farmId?: string | null;
+  // other dynamic slices: dailyLog, waterLogs, deliveries, weights, sheds, reminders, etc.
   [key: string]: any;
 };
 
 const STORAGE_KEY = "cluckhub:state:v1";
 
+/* ------------------------------------------------------------------ */
+/* Internal store with subscribe/persist                               */
+/* ------------------------------------------------------------------ */
 let state: ServerState = safeLoad();
 
 type Listener = () => void;
@@ -42,9 +46,17 @@ function persist(next: ServerState) {
   } catch {}
 }
 
+/* Normalize settings on boot */
+(() => {
+  state.settings = normalizeSettings(state.settings);
+})();
+
+/* ------------------------------------------------------------------ */
+/* Public store API                                                    */
+/* ------------------------------------------------------------------ */
 export function getState(): ServerState {
-  if (!state.settings) state.settings = { ...DEFAULT_SETTINGS };
-  else state.settings = normalizeSettings(state.settings);
+  // always ensure normalized settings
+  state.settings = normalizeSettings(state.settings);
   return state;
 }
 
@@ -66,23 +78,58 @@ export function subscribe(cb: Listener) {
   return () => listeners.delete(cb);
 }
 
-export function useServerState<T>(selector: (s: ServerState) => T): T {
-  const snapshot = useSyncExternalStore(
-    subscribe,
-    () => getState(),
-    () => getState()
-  );
-  const s: ServerState = useMemo(
+/* ------------------------------------------------------------------ */
+/* React hooks                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Two forms:
+ * 1) useServerState((s) => slice) -> T
+ * 2) useServerState("key", initialValue) -> [T, setT]
+ */
+export function useServerState<T>(selector: (s: ServerState) => T): T;
+export function useServerState<T>(key: string, initialValue: T): [T, (next: T | ((prev: T) => T)) => void];
+export function useServerState<T>(arg1: any, arg2?: any): any {
+  const isSelector = typeof arg1 === "function";
+  const snapshot = useSyncExternalStore(subscribe, () => getState(), () => getState());
+
+  // Always hand out normalized settings
+  const current = useMemo(
     () => ({ ...snapshot, settings: normalizeSettings(snapshot.settings) }),
     [snapshot]
   );
-  return selector(s);
+
+  if (isSelector) {
+    const selector = arg1 as (s: ServerState) => T;
+    return selector(current);
+  }
+
+  const key = String(arg1) as keyof ServerState;
+  const initialValue = arg2 as T;
+
+  // initialize on first read (but don't persist until a write to avoid noisy writes)
+  const value = (current as any)[key] ?? initialValue;
+
+  // stable setter
+  const setter = (next: T | ((prev: T) => T)) => {
+    setState((s) => {
+      const prev = (s as any)[key] ?? initialValue;
+      const resolved = typeof next === "function" ? (next as (p: T) => T)(prev) : next;
+      // special merge for settings
+      if (key === "settings") {
+        return { settings: normalizeSettings({ ...(prev || {}), ...(resolved as any) }) } as any;
+      }
+      return { [key]: resolved } as any;
+    });
+  };
+
+  // return tuple like React.useState
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const tupleRef = useRef<[T, typeof setter]>([value as T, setter]);
+  tupleRef.current[0] = value as T;
+  return tupleRef.current;
 }
 
 export const getSettings = () => getState().settings;
 export const setSettings = (patch: Partial<AppSettings>) =>
   setState((s) => ({ settings: { ...normalizeSettings(s.settings), ...patch } }));
-
-(() => {
-  state.settings = normalizeSettings(state.settings);
-})();

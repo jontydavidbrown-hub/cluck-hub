@@ -130,7 +130,7 @@ function extractPathParams(fullPath?: string) {
 }
 
 // Blob helpers
-const store = getStore(STORE_NAME);
+const store = getStore({ name: \1 });
 
 async function readJSON<T = any>(key: string): Promise<T | null> {
   const value = await store.get(key, { type: 'json' });
@@ -138,7 +138,7 @@ async function readJSON<T = any>(key: string): Promise<T | null> {
 }
 
 async function writeJSON(key: string, value: any): Promise<void> {
-  await store.set(key, JSON.stringify(value), { contentType: 'application/json' });
+  await store.setJSON(key, value);
 }
 
 async function getFarm(farmId: string): Promise<Farm | null> {
