@@ -1,19 +1,10 @@
 import { useServerState } from "../lib/serverState";
 import { useState } from "react";
 
-type Reminder = {
-  id: string;
-  when: string; // ISO date
-  text: string;
-  done: boolean;
-};
+type Reminder = { id: string; when: string; text: string; done: boolean };
 
-function uid() {
-  return Math.random().toString(36).slice(2, 10);
-}
-function todayISO() {
-  return new Date().toISOString().slice(0, 10);
-}
+function uid() { return Math.random().toString(36).slice(2, 10); }
+function todayISO() { return new Date().toISOString().slice(0, 10); }
 
 export default function Reminders() {
   const { state: reminders, setState: setReminders, loading, synced } =
@@ -21,20 +12,18 @@ export default function Reminders() {
   const [form, setForm] = useState<Reminder>({ id: "", when: todayISO(), text: "", done: false });
 
   function add() {
-    if (!form.text) return;
-    const r = { ...form, id: uid() };
-    setReminders([...reminders, r]);
+    if (!form.text.trim()) return;
+    setReminders([...reminders, { ...form, id: uid() }]);
     setForm({ id: "", when: todayISO(), text: "", done: false });
   }
-
   function toggle(id: string) {
-    setReminders(reminders.map(r => (r.id === id ? { ...r, done: !r.done } : r)));
+    setReminders(reminders.map((r) => (r.id === id ? { ...r, done: !r.done } : r)));
   }
   function remove(id: string) {
-    setReminders(reminders.filter(r => r.id !== id));
+    setReminders(reminders.filter((r) => r.id !== id));
   }
 
-  const sorted = [...reminders].sort((a,b)=> (a.when > b.when ? 1 : -1));
+  const sorted = [...reminders].sort((a, b) => (a.when > b.when ? 1 : -1));
 
   return (
     <div className="space-y-6">
@@ -48,21 +37,9 @@ export default function Reminders() {
       </header>
 
       <div className="grid gap-3 md:grid-cols-4 bg-white p-4 border rounded-xl">
-        <input
-          type="date"
-          value={form.when}
-          onChange={(e) => setForm({ ...form, when: e.target.value })}
-          className="border rounded p-2"
-        />
-        <input
-          placeholder="Reminder"
-          value={form.text}
-          onChange={(e) => setForm({ ...form, text: e.target.value })}
-          className="border rounded p-2 md:col-span-2"
-        />
-        <button onClick={add} className="rounded-lg bg-slate-900 text-white px-3 py-2">
-          Add
-        </button>
+        <input type="date" value={form.when} onChange={(e) => setForm({ ...form, when: e.target.value })} className="border rounded p-2" />
+        <input placeholder="Reminder" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} className="border rounded p-2 md:col-span-2" />
+        <button onClick={add} className="rounded-lg bg-slate-900 text-white px-3 py-2">Add</button>
       </div>
 
       <div className="bg-white border rounded-xl divide-y">
