@@ -118,11 +118,12 @@ export default function Setup() {
         <input
           type="number"
           min={1}
-          value={settings.batchLengthDays || 49}
-          onChange={(e) =>
-            setSettings({ ...settings, batchLengthDays: Math.max(1, Number(e.target.value || 1)) })
-          }
-          className="border rounded p-2 w-40"
+          value={settings.batchLengthDays}
+          onChange={(e) => {
+            const next = Math.max(1, Number(e.target.value || 1));
+            setSettings({ ...settings, batchLengthDays: next });
+           }}
+           className="border rounded p-2 w-40"
         />
         <div className="text-xs text-slate-500 mt-2">Used for progress on Dashboard (Day X of Y).</div>
       </div>
