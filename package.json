@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@netlify/blobs": "^10.0.8",
+    "bcryptjs": "^3.0.2",
     "jsonwebtoken": "^9.0.2",
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^3.8.2",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@netlify/functions": "^2.8.2",
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20.14.10",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
