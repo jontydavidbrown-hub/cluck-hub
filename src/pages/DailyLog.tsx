@@ -95,4 +95,45 @@ export default function DailyLog() {
 
       {/* Table */}
       <div className="overflow-x-auto">
-        <table className="min-w-full bg-white border rounded-
+        <table className="min-w-full bg-white border rounded-xl overflow-hidden">
+          <thead className="bg-slate-50 text-left">
+            <tr>
+              <th className="p-3 border-b">Date</th>
+              <th className="p-3 border-b">Shed</th>
+              <th className="p-3 border-b">Deads</th>
+              <th className="p-3 border-b">Runt culls</th>
+              <th className="p-3 border-b">Leg culls</th>
+              <th className="p-3 border-b"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((e, i) => (
+              <tr key={i} className="border-b last:border-none">
+                <td className="p-3">{e.date}</td>
+                <td className="p-3">{e.shed}</td>
+                <td className="p-3">{e.deads}</td>
+                <td className="p-3">{e.runtCulls}</td>
+                <td className="p-3">{e.legCulls}</td>
+                <td className="p-3 text-right">
+                  <button onClick={() => remove(i)} className="text-red-600 hover:underline">remove</button>
+                </td>
+              </tr>
+            ))}
+            {!sorted.length && (
+              <tr><td className="p-6 text-slate-500" colSpan={6}>No entries yet.</td></tr>
+            )}
+          </tbody>
+          <tfoot>
+            <tr className="bg-slate-50 font-medium">
+              <td className="p-3" colSpan={2}>Totals</td>
+              <td className="p-3">{totals.deads}</td>
+              <td className="p-3">{totals.runtCulls}</td>
+              <td className="p-3">{totals.legCulls}</td>
+              <td className="p-3" />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
