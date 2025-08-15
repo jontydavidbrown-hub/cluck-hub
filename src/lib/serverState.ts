@@ -86,7 +86,7 @@ export function useServerState<T>(arg1: any, arg2?: any): any {
   const isSelector = typeof arg1 === "function";
   const snapshot = useSyncExternalStore(subscribe, () => getState(), () => getState());
 
-  // Always hand out normalized settings
+  // Always normalize settings in the view of state React sees
   const current = useMemo(
     () => ({ ...snapshot, settings: normalizeSettings(snapshot.settings) }),
     [snapshot]
@@ -99,7 +99,13 @@ export function useServerState<T>(arg1: any, arg2?: any): any {
 
   const key = String(arg1) as keyof ServerState;
   const initialValue = arg2 as T;
-  const value = (current as any)[key] ?? initialValue;
+  const raw = (current as any)[key];
+
+  // ⭐️ Coerce array-shaped state to a safe array if the initial value was an array
+  let value: any = raw ?? initialValue;
+  if (Array.isArray(initialValue)) {
+    value = Array.isArray(raw) ? raw : [];
+  }
 
   const setter = (next: T | ((prev: T) => T)) => {
     setState((s) => {
