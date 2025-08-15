@@ -3,26 +3,17 @@
   publish = "dist"
 
 [build.environment]
-  # Pin Node so Netlify and local dev match your dependencies
   NODE_VERSION = "20.12.2"
 
 [functions]
   node_bundler = "esbuild"
-  # Let Netlify bundle these server deps for the functions we added
   external_node_modules = ["jsonwebtoken", "@netlify/blobs", "resend"]
 
-# Scheduled reminders email (07:00 AEST = 21:00 UTC previous day)
 [functions."cron-reminders"]
+  # 7:00 AM Brisbane (AEST=UTC+10) -> 21:00 UTC previous day
   schedule = "0 21 * * *"
 
-# Keep function routes working during SPA redirects
-[[redirects]]
-  from = "/.netlify/functions/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
-  force = true
-
-# Single Page App fallback
+# SPA fallback only (do NOT add any /.netlify/functions redirects)
 [[redirects]]
   from = "/*"
   to = "/index.html"
