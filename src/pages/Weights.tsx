@@ -1,75 +1,85 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useServerState } from "../lib/serverState";
+import { generateWeightsPdf } from "../lib/pdf";
 
-type WeightRec = {
-  id: string;
-  date: string;      // ISO date
+type ShedWeights = {
   shed: string;
-  buckets: number;   // number of buckets weighed
   birdsPerBucket: number;
-  totalWeightKg: number; // total combined weight of those buckets (kg)
+  buckets: number[];     // kg per bucket
   notes?: string;
+  createdAt: string;     // ISO
 };
+type WeightsByShed = Record<string, ShedWeights[]>;
 
-function uid() {
-  return Math.random().toString(36).slice(2, 10);
-}
-function todayISO() {
-  return new Date().toISOString().slice(0, 10);
-}
+const SHEDS_KEY = "sheds";
+const WEIGHTS_KEY = "weightsByShed";
+
+function todayISO() { return new Date().toISOString().slice(0, 10); }
 
 export default function Weights() {
-  const { state: records, setState: setRecords, loading, synced } =
-    useServerState<WeightRec[]>("weights", []);
+  // sheds list from Setup
+  const { state: sheds } = useServerState<string[]>(SHEDS_KEY, []);
+  const { state: byShed, setState: setByShed, loading, synced } =
+    useServerState<WeightsByShed>(WEIGHTS_KEY, {});
 
-  const [form, setForm] = useState<WeightRec>({
-    id: "",
-    date: todayISO(),
-    shed: "",
-    buckets: 1,
-    birdsPerBucket: 10,
-    totalWeightKg: 0,
-    notes: "",
-  });
+  const [shed, setShed] = useState(sheds[0] || "");
+  const [birdsPerBucket, setBirdsPerBucket] = useState<number>(10);
+  const [buckets, setBuckets] = useState<Array<number | null>>([]);
+  const [notes, setNotes] = useState<string>("");
+
+  const dateRef = useRef<HTMLInputElement | null>(null);
+
+  function addBucket() { setBuckets([...buckets, null]); }
+  function setBucket(i: number, v: number | null) {
+    const next = buckets.slice(); next[i] = v; setBuckets(next);
+  }
+  function removeBucket(i: number) {
+    const next = buckets.slice(); next.splice(i, 1); setBuckets(next);
+  }
 
   function addRecord() {
-    if (!form.shed || !form.buckets || !form.birdsPerBucket) return;
-    const rec: WeightRec = { ...form, id: uid() };
-    setRecords([...records, rec]);
-    setForm({
-      id: "",
-      date: todayISO(),
-      shed: "",
-      buckets: 1,
-      birdsPerBucket: 10,
-      totalWeightKg: 0,
-      notes: "",
-    });
+    if (!shed || !birdsPerBucket || buckets.length === 0) return;
+    const kgBuckets: number[] = buckets.map((b) => Number(b || 0));
+    const rec: ShedWeights = {
+      shed,
+      birdsPerBucket: Number(birdsPerBucket || 0),
+      buckets: kgBuckets,
+      notes: notes || "",
+      createdAt: new Date().toISOString(),
+    };
+    const next = { ...(byShed || {}) };
+    const arr = next[shed] || [];
+    next[shed] = [...arr, rec];
+    setByShed(next);
+    setBuckets([]); setNotes("");
+    if (dateRef.current) dateRef.current.value = todayISO();
   }
 
-  function removeRecord(id: string) {
-    setRecords(records.filter((r) => r.id !== id));
-  }
-
-  const withCalcs = useMemo(
-    () =>
-      records.map((r) => {
-        const totalBirds = r.buckets * r.birdsPerBucket;
-        const avgPerBird = totalBirds ? r.totalWeightKg * 1000 / totalBirds : 0; // grams
-        return { ...r, totalBirds, avgPerBird };
-      }),
-    [records]
-  );
-
-  const byDate = useMemo(() => {
-    const groups = new Map<string, typeof withCalcs>();
-    for (const r of withCalcs) {
-      const arr = groups.get(r.date) || [];
-      arr.push(r);
-      groups.set(r.date, arr);
+  const flat = useMemo(() => {
+    const arr: Array<ShedWeights & { index: number }> = [];
+    for (const s of Object.keys(byShed || {})) {
+      (byShed[s] || []).forEach((r, i) => arr.push({ ...r, index: i }));
     }
-    return Array.from(groups.entries()).sort(([a], [b]) => (a > b ? -1 : 1));
-  }, [withCalcs]);
+    return arr.sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1));
+  }, [byShed]);
+
+  function removeRecord(s: string, i: number) {
+    const next = { ...(byShed || {}) };
+    next[s] = (next[s] || []).slice();
+    next[s].splice(i, 1);
+    setByShed(next);
+  }
+
+  const currentStats = useMemo(() => {
+    const totalBirds = buckets.reduce((a, b) => a + Number(b || 0), 0) * birdsPerBucket; // (sum kg) * birds/bucket ??? (UI retained)
+    const totalKg = buckets.reduce((a, b) => a + Number(b || 0), 0);
+    const avgPerBird = totalBirds ? (totalKg * 1000) / totalBirds : 0;
+    return { totalKg, totalBirds, avgPerBird };
+  }, [buckets, birdsPerBucket]);
+
+  function exportPdf() {
+    generateWeightsPdf(byShed || {});
+  }
 
   return (
     <div className="space-y-6">
@@ -82,108 +92,92 @@ export default function Weights() {
         )}
       </header>
 
-      {/* Input */}
+      {/* Input row */}
       <div className="grid gap-3 md:grid-cols-6 bg-white p-4 border rounded-xl">
-        <input
-          type="date"
-          value={form.date}
-          onChange={(e) => setForm({ ...form, date: e.target.value })}
-          className="border rounded p-2 md:col-span-1"
-        />
-        <input
-          placeholder="Shed"
-          value={form.shed}
-          onChange={(e) => setForm({ ...form, shed: e.target.value })}
-          className="border rounded p-2 md:col-span-1"
-        />
-        <input
-          placeholder="Buckets"
-          type="number"
-          value={form.buckets}
-          onChange={(e) => setForm({ ...form, buckets: Number(e.target.value || 0) })}
-          className="border rounded p-2 md:col-span-1"
-        />
+        <select value={shed} onChange={(e) => setShed(e.target.value)} className="border rounded p-2">
+          {sheds.length === 0 && <option value="">No sheds</option>}
+          {sheds.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <input ref={dateRef} type="date" defaultValue={todayISO()} className="border rounded p-2" />
         <input
           placeholder="Birds per bucket"
           type="number"
-          value={form.birdsPerBucket}
-          onChange={(e) =>
-            setForm({ ...form, birdsPerBucket: Number(e.target.value || 0) })
-          }
-          className="border rounded p-2 md:col-span-1"
+          value={birdsPerBucket}
+          onChange={(e) => setBirdsPerBucket(Number(e.target.value || 0))}
+          className="border rounded p-2"
         />
-        <input
-          placeholder="Total weight (kg)"
-          type="number"
-          step="0.01"
-          value={form.totalWeightKg}
-          onChange={(e) =>
-            setForm({ ...form, totalWeightKg: Number(e.target.value || 0) })
-          }
-          className="border rounded p-2 md:col-span-1"
-        />
-        <button onClick={addRecord} className="rounded-lg bg-slate-900 text-white px-3 py-2 md:col-span-1">
-          Add
-        </button>
+        <div className="md:col-span-2 flex items-center gap-2">
+          <button onClick={addBucket} className="rounded-lg bg-slate-900 text-white px-3 py-2">Add bucket</button>
+          <button onClick={exportPdf} className="rounded-lg border px-3 py-2">Export PDF</button>
+        </div>
         <input
           placeholder="Notes (optional)"
-          value={form.notes ?? ""}
-          onChange={(e) => setForm({ ...form, notes: e.target.value })}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
           className="border rounded p-2 md:col-span-6"
         />
       </div>
 
-      {/* Groups by date */}
+      {/* Buckets list (kg) */}
+      <div className="bg-white border rounded-xl p-4">
+        <div className="grid gap-3 md:grid-cols-6">
+          {buckets.map((b, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input
+                type="number"
+                step="0.01"
+                placeholder={`Bucket ${i + 1} (kg)`}
+                value={b ?? ""}
+                onChange={(e) => setBucket(i, e.target.value === "" ? null : Number(e.target.value))}
+                className="border rounded p-2 w-full"
+              />
+              <button aria-label="remove bucket" onClick={() => removeBucket(i)} className="text-red-600">✕</button>
+            </div>
+          ))}
+          {!buckets.length && <div className="text-slate-500">No buckets yet. Add some above.</div>}
+        </div>
+        <div className="mt-4 text-sm text-slate-600">
+          <b>Total kg:</b> {currentStats.totalKg.toFixed(2)} · <b>Avg per bird (g):</b> {Math.round(currentStats.avgPerBird)}
+        </div>
+      </div>
+
+      {/* Records by shed/date */}
       <div className="space-y-4">
-        {byDate.map(([date, arr]) => (
-          <div key={date} className="bg-white border rounded-xl overflow-hidden">
-            <div className="px-4 py-3 bg-slate-50 border-b font-semibold">{date}</div>
+        {Object.keys(byShed || {}).map((s) => (
+          <div key={s} className="bg-white border rounded-xl overflow-hidden">
+            <div className="px-4 py-3 bg-slate-50 border-b font-semibold">{s}</div>
             <div className="overflow-x-auto">
               <table className="min-w-full">
                 <thead className="text-left">
                   <tr>
-                    <th className="p-3 border-b">Shed</th>
-                    <th className="p-3 border-b">Buckets</th>
-                    <th className="p-3 border-b">Birds/Bucket</th>
-                    <th className="p-3 border-b">Total Birds</th>
-                    <th className="p-3 border-b">Total (kg)</th>
-                    <th className="p-3 border-b">Avg per bird (g)</th>
+                    <th className="p-3 border-b">Created</th>
+                    <th className="p-3 border-b">Birds/bucket</th>
+                    <th className="p-3 border-b">Buckets (kg)</th>
                     <th className="p-3 border-b">Notes</th>
                     <th className="p-3 border-b"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {arr.map((r) => (
-                    <tr key={r.id} className="border-b last:border-none">
-                      <td className="p-3">{r.shed}</td>
-                      <td className="p-3">{r.buckets}</td>
+                  {(byShed[s] || []).map((r, i) => (
+                    <tr key={i} className="border-b last:border-none">
+                      <td className="p-3">{new Date(r.createdAt).toLocaleString()}</td>
                       <td className="p-3">{r.birdsPerBucket}</td>
-                      <td className="p-3">{r.totalBirds}</td>
-                      <td className="p-3">{r.totalWeightKg.toFixed(2)}</td>
-                      <td className="p-3">{Math.round(r.avgPerBird)}</td>
-                      <td className="p-3">{r.notes ?? "-"}</td>
+                      <td className="p-3">{r.buckets.map((x) => x.toFixed(2)).join(", ")}</td>
+                      <td className="p-3">{r.notes || "-"}</td>
                       <td className="p-3 text-right">
-                        <button onClick={() => removeRecord(r.id)} className="text-red-600 hover:underline">
-                          remove
-                        </button>
+                        <button onClick={() => removeRecord(s, i)} className="text-red-600 hover:underline">remove</button>
                       </td>
                     </tr>
                   ))}
-                  {!arr.length && (
-                    <tr>
-                      <td className="p-6 text-slate-500" colSpan={8}>
-                        No records.
-                      </td>
-                    </tr>
+                  {!(byShed[s] || []).length && (
+                    <tr><td className="p-6 text-slate-500" colSpan={5}>No records.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
           </div>
         ))}
-        {!byDate.length && (
-          <div className="text-slate-500">No weight records yet. Add one above.</div>
-        )}
+        {!Object.keys(byShed || {}).length && <div className="text-slate-500">No weight records yet.</div>}
       </div>
     </div>
   );
