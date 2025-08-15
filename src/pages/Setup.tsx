@@ -113,3 +113,58 @@ export default function Setup() {
           </div>
         </div>
       </div>
+
+      {/* Add shed */}
+      <div className="grid gap-3 md:grid-cols-5 bg-white p-4 border rounded-xl">
+        <input
+          placeholder="Shed name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="border rounded p-2 md:col-span-2"
+        />
+        <input
+          type="date"
+          value={placedDate}
+          onChange={(e) => setPlacedDate(e.target.value)}
+          className="border rounded p-2"
+        />
+        <input
+          placeholder="Number placed"
+          type="number"
+          value={initialCount}
+          onChange={(e) => setInitialCount(e.target.value)}
+          className="border rounded p-2"
+        />
+        <button
+          onClick={add}
+          className="rounded-lg bg-slate-900 text-white px-3 py-2"
+        >
+          Add Shed
+        </button>
+      </div>
+
+      {/* Sheds list */}
+      <div className="bg-white border rounded-xl divide-y">
+        {sheds.map((s) => (
+          <div key={s.id} className="p-4 flex items-center justify-between">
+            <div>
+              <div className="font-medium">{s.name}</div>
+              <div className="text-xs text-slate-500">
+                Placed: {s.placedDate || "-"} · Initial count: {s.initialCount ?? "-"}
+              </div>
+            </div>
+            <button
+              onClick={() => remove(s.id)}
+              className="text-red-600 hover:underline"
+            >
+              remove
+            </button>
+          </div>
+        ))}
+        {!sheds.length && (
+          <div className="p-6 text-slate-500">No sheds yet. Add one above.</div>
+        )}
+      </div>
+    </div>
+  );
+}
