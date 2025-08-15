@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerState } from "../lib/serverState";
 import { generateWeightsPdf } from "../lib/pdf";
 
+type Shed = { id: string; name: string };
 type ShedWeights = {
   shed: string;
   birdsPerBucket: number;
@@ -17,17 +18,33 @@ const WEIGHTS_KEY = "weightsByShed";
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
 export default function Weights() {
-  // sheds list from Setup
-  const { state: sheds } = useServerState<string[]>(SHEDS_KEY, []);
+  const { state: shedsRaw } = useServerState<any>(SHEDS_KEY, []);
+  const shedNames = useMemo<string[]>(() => {
+    if (!Array.isArray(shedsRaw)) return [];
+    return shedsRaw.map((x: any) => (typeof x === "string" ? x : x?.name)).filter(Boolean);
+  }, [shedsRaw]);
+
   const { state: byShed, setState: setByShed, loading, synced } =
     useServerState<WeightsByShed>(WEIGHTS_KEY, {});
 
-  const [shed, setShed] = useState(sheds[0] || "");
+  const [shed, setShed] = useState<string>("");
   const [birdsPerBucket, setBirdsPerBucket] = useState<number>(10);
   const [buckets, setBuckets] = useState<Array<number | null>>([]);
   const [notes, setNotes] = useState<string>("");
 
   const dateRef = useRef<HTMLInputElement | null>(null);
+
+  // Preselect shed from ?shed=
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const target = params.get("shed");
+    if (target && shedNames.includes(target)) {
+      setShed(target);
+    } else if (!shed && shedNames.length) {
+      setShed(shedNames[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shedNames.join("|")]);
 
   function addBucket() { setBuckets([...buckets, null]); }
   function setBucket(i: number, v: number | null) {
@@ -71,8 +88,8 @@ export default function Weights() {
   }
 
   const currentStats = useMemo(() => {
-    const totalBirds = buckets.reduce((a, b) => a + Number(b || 0), 0) * birdsPerBucket; // (sum kg) * birds/bucket ??? (UI retained)
     const totalKg = buckets.reduce((a, b) => a + Number(b || 0), 0);
+    const totalBirds = buckets.length * birdsPerBucket;
     const avgPerBird = totalBirds ? (totalKg * 1000) / totalBirds : 0;
     return { totalKg, totalBirds, avgPerBird };
   }, [buckets, birdsPerBucket]);
@@ -95,8 +112,8 @@ export default function Weights() {
       {/* Input row */}
       <div className="grid gap-3 md:grid-cols-6 bg-white p-4 border rounded-xl">
         <select value={shed} onChange={(e) => setShed(e.target.value)} className="border rounded p-2">
-          {sheds.length === 0 && <option value="">No sheds</option>}
-          {sheds.map((s) => <option key={s} value={s}>{s}</option>)}
+          {shedNames.length === 0 && <option value="">No sheds</option>}
+          {shedNames.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
         <input ref={dateRef} type="date" defaultValue={todayISO()} className="border rounded p-2" />
         <input
