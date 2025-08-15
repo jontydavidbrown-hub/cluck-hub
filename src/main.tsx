@@ -13,6 +13,7 @@ import User from "./pages/User";
 import Analytics from "./pages/Analytics";
 import Members from "./pages/Members";
 import { FarmProvider } from "./lib/FarmContext";
+import ErrorBoundary from "./ErrorBoundary";
 import "./index.css";
 
 const router = createBrowserRouter([
@@ -21,9 +22,9 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       { index: true, element: <Dashboard /> },
-      { path: "daily", element: <DailyLog /> },
+      { path: "daily-log", element: <DailyLog /> },
       { path: "weights", element: <Weights /> },
-      { path: "feed", element: <FeedSilos /> },
+      { path: "feed-silos", element: <FeedSilos /> },
       { path: "water", element: <Water /> },
       { path: "reminders", element: <Reminders /> },
       { path: "setup", element: <Setup /> },
@@ -37,7 +38,10 @@ const router = createBrowserRouter([
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <FarmProvider>
-      <RouterProvider router={router} />
+      <ErrorBoundary>
+        <RouterProvider router={router} />
+      </ErrorBoundary>
     </FarmProvider>
   </React.StrictMode>
 );
+ 

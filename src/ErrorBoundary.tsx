@@ -1,23 +1,21 @@
-import React from "react";
+import { Component, ReactNode } from "react";
 
-type Props = { children: React.ReactNode };
-type State = { hasError: boolean; error?: any };
+type Props = { children: ReactNode };
+type State = { error?: Error };
 
-export class ErrorBoundary extends React.Component<Props, State> {
-  state: State = { hasError: false };
-  static getDerivedStateFromError(error: any) {
-    return { hasError: true, error };
-  }
-  componentDidCatch(error: any, info: any) {
-    console.error("App crash:", error, info?.componentStack);
+export default class ErrorBoundary extends Component<Props, State> {
+  state: State = {};
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, info: any) {
+    console.error("ErrorBoundary caught", error, info);
   }
   render() {
-    if (this.state.hasError) {
+    if (this.state.error) {
       return (
-        <div className="p-6 text-red-700">
-          <h1 className="text-xl font-semibold">Something went wrong</h1>
-          <pre className="mt-3 whitespace-pre-wrap text-sm">
-            {String(this.state.error)}
+        <div className="p-6">
+          <h1 className="text-xl font-semibold mb-2">Unexpected Application Error</h1>
+          <pre className="p-3 rounded bg-slate-100 text-slate-800 overflow-auto">
+            {String(this.state.error?.message || this.state.error)}
           </pre>
         </div>
       );
