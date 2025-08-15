@@ -2,33 +2,69 @@ import { useMemo } from "react";
 import { useSyncExternalStore } from "react";
 import { DEFAULT_SETTINGS, normalizeSettings, type AppSettings } from "./defaults";
 
+/**
+ * Keys that MUST always be arrays in the app.
+ * If any of these are missing or the wrong type in localStorage,
+ * we coerce them to [] so .map() is always safe.
+ */
+const ARRAY_KEYS = new Set([
+  "sheds",
+  "dailyLog",
+  "waterLogs",
+  "deliveries",
+  "weights",
+  "reminders",
+  "members",
+  "notes",
+  "batches",
+  "feed",
+]);
+
 export type ServerState = {
   settings: AppSettings;
   user?: { email: string } | null;
   farmId?: string | null;
+  // allow arbitrary slices
   [key: string]: any;
 };
 
-const STORAGE_KEY = "cluckhub:state:v1";
+// Bump the storage key to invalidate any corrupted old data
+const STORAGE_KEY = "cluckhub:state:v2";
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
 
-let state: ServerState = safeLoad();
-state.settings = normalizeSettings(state.settings);
+let state: ServerState = loadAndSanitize();
 
-function safeLoad(): ServerState {
+/* ---------------- core state helpers ---------------- */
+
+function loadAndSanitize(): ServerState {
+  let s: ServerState = { settings: { ...DEFAULT_SETTINGS } };
   try {
     if (typeof window !== "undefined") {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        parsed.settings = normalizeSettings(parsed.settings);
-        return parsed;
+        if (parsed && typeof parsed === "object") s = parsed;
       }
     }
-  } catch {}
-  return { settings: { ...DEFAULT_SETTINGS } };
+  } catch {
+    // ignore bad JSON
+  }
+  return normalizeWholeState(s);
+}
+
+function normalizeWholeState(s: ServerState): ServerState {
+  const out: ServerState = { ...s };
+  // settings always normalized
+  out.settings = normalizeSettings(out.settings);
+
+  // every array-key must be a real array, never undefined/string/object
+  for (const k of ARRAY_KEYS) {
+    const v = (out as any)[k];
+    if (!Array.isArray(v)) (out as any)[k] = [];
+  }
+  return out;
 }
 
 function persist(next: ServerState) {
@@ -36,15 +72,23 @@ function persist(next: ServerState) {
     if (typeof window !== "undefined") {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     }
-  } catch {}
+  } catch {
+    // ignore quota issues
+  }
 }
 
 function emit() {
   for (const l of Array.from(listeners)) l();
 }
 
+export function subscribe(cb: Listener) {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+
 export function getState(): ServerState {
-  state.settings = normalizeSettings(state.settings);
+  // Always return a sanitized, normalized snapshot
+  state = normalizeWholeState(state);
   return state;
 }
 
@@ -53,27 +97,27 @@ export function setState(
 ) {
   const base = getState();
   const delta = typeof patch === "function" ? patch(base) : patch;
-  const next: ServerState = {
+
+  const next: ServerState = normalizeWholeState({
     ...base,
     ...delta,
+    // merge settings through the normalizer
     settings: normalizeSettings({ ...(base.settings || {}), ...(delta as any)?.settings }),
-  };
+  });
+
   state = next;
   persist(state);
   emit();
 }
 
-export function subscribe(cb: Listener) {
-  listeners.add(cb);
-  return () => listeners.delete(cb);
-}
+/* ---------------- React hook with hybrid API ---------------- */
 
 /**
  * Overloads:
  * 1) useServerState((s) => slice) -> T
- * 2) useServerState("key", initial) -> returns an object that is ALSO iterable so array destructuring works:
+ * 2) useServerState("key", initial) -> object that is ALSO iterable:
  *    const { state, setState } = useServerState("k", init)
- *    const [value, setValue] = useServerState("k", init)
+ *    const [value, setValue]   = useServerState("k", init)
  */
 export function useServerState<T>(selector: (s: ServerState) => T): T;
 export function useServerState<T>(key: string, initialValue: T): {
@@ -86,30 +130,38 @@ export function useServerState<T>(arg1: any, arg2?: any): any {
   const isSelector = typeof arg1 === "function";
   const snapshot = useSyncExternalStore(subscribe, () => getState(), () => getState());
 
-  // Always normalize settings in the view of state React sees
-  const current = useMemo(
-    () => ({ ...snapshot, settings: normalizeSettings(snapshot.settings) }),
-    [snapshot]
-  );
+  // React-visible view is always normalized/sanitized
+  const view = useMemo(() => normalizeWholeState(snapshot), [snapshot]);
 
   if (isSelector) {
     const selector = arg1 as (s: ServerState) => T;
-    return selector(current);
+    // Even selector results get array coercion if key is known
+    try {
+      const res = selector(view);
+      return res;
+    } catch (e) {
+      // If user code throws inside selector, surface a safe fallback
+      // (keeps app from white-screening)
+      return undefined as unknown as T;
+    }
   }
 
   const key = String(arg1) as keyof ServerState;
   const initialValue = arg2 as T;
-  const raw = (current as any)[key];
 
-  // ⭐️ Coerce array-shaped state to a safe array if the initial value was an array
-  let value: any = raw ?? initialValue;
-  if (Array.isArray(initialValue)) {
-    value = Array.isArray(raw) ? raw : [];
-  }
+  // Base value: if the key is in ARRAY_KEYS and not an array, force []
+  let value: any = (view as any)[key];
+  if (ARRAY_KEYS.has(key as string)) value = Array.isArray(value) ? value : [];
+
+  // If the caller provided an array initial, ensure array semantics anyway
+  if (Array.isArray(initialValue) && !Array.isArray(value)) value = [];
 
   const setter = (next: T | ((prev: T) => T)) => {
     setState((s) => {
-      const prev = (s as any)[key] ?? initialValue;
+      const prevRaw = (s as any)[key];
+      const prev = ARRAY_KEYS.has(key as string)
+        ? (Array.isArray(prevRaw) ? prevRaw : [])
+        : prevRaw;
       const resolved = typeof next === "function" ? (next as (p: T) => T)(prev) : next;
       if (key === "settings") {
         return { settings: normalizeSettings({ ...(prev || {}), ...(resolved as any) }) } as any;
@@ -118,7 +170,7 @@ export function useServerState<T>(arg1: any, arg2?: any): any {
     });
   };
 
-  // Object that is ALSO iterable: supports both {state,setState} and [state,setState]
+  // Return object that is ALSO iterable: supports both destructuring styles
   const obj: any = {
     state: value as T,
     setState: setter,
@@ -135,6 +187,7 @@ export function useServerState<T>(arg1: any, arg2?: any): any {
   return obj;
 }
 
+/* convenience helpers */
 export const getSettings = () => getState().settings;
 export const setSettings = (patch: Partial<AppSettings>) =>
   setState((s) => ({ settings: { ...normalizeSettings(s.settings), ...patch } }));
