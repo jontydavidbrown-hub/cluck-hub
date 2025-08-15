@@ -1,20 +1,26 @@
+// src/lib/defaults.ts
+
+// Keep this type loose so we don't break other dynamic settings you add later.
 export type AppSettings = {
-  /** Days from placement to batch end */
+  // required in many places (batch progress etc.)
   batchLengthDays: number;
-  /** IANA TZ name used for reminders/formatting */
-  timezone?: string;
-  /** Display units for water logs */
-  waterUnits?: "L" | "gal";
+
+  // everything else is optional/extendable
+  [key: string]: any;
 };
 
+// Single source of truth for defaults
 export const DEFAULT_SETTINGS: AppSettings = {
-  batchLengthDays: 42,
-  timezone: "Australia/Brisbane",
-  waterUnits: "L",
+  batchLengthDays: 56, // <- safe default (8-week batch). Change if your app expects a different number.
 };
 
-export function normalizeSettings(
-  s?: Partial<AppSettings> | null
-): AppSettings {
-  return { ...DEFAULT_SETTINGS, ...(s || {}) };
+// Ensure every time we load/patch settings, required keys exist
+export function normalizeSettings(input?: Partial<AppSettings> | null): AppSettings {
+  const src = input ?? {};
+  return {
+    ...DEFAULT_SETTINGS,
+    ...src,
+    // coerce to number if someone saved a string by accident
+    batchLengthDays: Number(src.batchLengthDays ?? DEFAULT_SETTINGS.batchLengthDays),
+  };
 }
