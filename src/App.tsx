@@ -16,7 +16,6 @@ const links = [
 export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
-  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const loc = useLocation();
 
   // Close drawer on route change
@@ -25,30 +24,49 @@ export default function App() {
   // Swipe gesture (mobile)
   useSwipeDrawer(drawerOpen, setDrawerOpen);
 
-  // Show login if a sign-out just happened or if session is missing
+  // Decide whether to show the login lightbox
   useEffect(() => {
+    // If we just signed out, force the lightbox open
     if (localStorage.getItem("forceLogin") === "1") {
       localStorage.removeItem("forceLogin");
       setShowLogin(true);
     }
-    checkSession().then((email) => {
-      setSessionEmail(email);
-      if (!email) setShowLogin(true);
+    // Check current session; if missing, open lightbox
+    ensureSession().then((ok) => {
+      if (!ok) setShowLogin(true);
     });
   }, []);
 
-  // While the login is open, poll for session and auto-hide when logged in
+  // While the login is open, poll for session and auto-hide once authenticated
   useEffect(() => {
     if (!showLogin) return;
     let timer = window.setInterval(async () => {
-      const email = await checkSession();
-      if (email) {
-        setSessionEmail(email);
-        setShowLogin(false);
-      }
-    }, 1500);
+      const ok = await ensureSession();
+      if (ok) setShowLogin(false);
+    }, 1200);
     return () => { window.clearInterval(timer); };
   }, [showLogin]);
+
+  // Also listen for a custom postMessage or storage changes (belt & braces)
+  useEffect(() => {
+    function onMsg(e: MessageEvent) {
+      if (typeof e.data === "object" && e.data && (e.data.type === "auth:login" || e.data.type === "login:success")) {
+        setShowLogin(false);
+      }
+    }
+    function onStorage(e: StorageEvent) {
+      if (e.key === "auth:login" && e.newValue === "1") {
+        localStorage.removeItem("auth:login");
+        setShowLogin(false);
+      }
+    }
+    window.addEventListener("message", onMsg);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("message", onMsg);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -106,13 +124,8 @@ export default function App() {
         <Outlet />
       </main>
 
-      {/* Login Lightbox (appears if not signed in or after sign-out) */}
-      {showLogin && (
-        <div className="fixed inset-0 z-[60]">
-          {/* The lightbox component renders its own UI; we just mount it */}
-          <CredentialLightbox />
-        </div>
-      )}
+      {/* Login Lightbox: mounted WITHOUT our own overlay to avoid blocking clicks */}
+      {showLogin && <CredentialLightbox />}
     </div>
   );
 }
@@ -207,22 +220,27 @@ function useSwipeDrawer(open: boolean, setOpen: (v: boolean) => void) {
   }, [open, setOpen]);
 }
 
-/** Session helper */
-async function checkSession(): Promise<string | null> {
+/** Returns true if a session is present (email found or user endpoint returns 200) */
+async function ensureSession(): Promise<boolean> {
   try {
+    // Primary: session endpoint with credentials
     const res = await fetch("/.netlify/functions/auth?action=session", { credentials: "include" });
-    if (!res.ok) return null;
-    const data = await res.json();
-    // Try multiple shapes just in case
-    const email =
-      data?.email ??
-      data?.user?.email ??
-      data?.session?.email ??
-      data?.session?.user?.email ??
-      data?.identity?.email ??
-      null;
-    return typeof email === "string" && email.length > 0 ? email : null;
-  } catch {
-    return null;
-  }
+    if (res.ok) {
+      const data = await res.json();
+      const email =
+        data?.email ??
+        data?.user?.email ??
+        data?.session?.email ??
+        data?.session?.user?.email ??
+        data?.identity?.email ??
+        null;
+      if (typeof email === "string" && email.length > 0) return true;
+    }
+  } catch {}
+  // Fallback: if /user returns 200, we’re authenticated
+  try {
+    const prof = await fetch("/.netlify/functions/user", { credentials: "include" });
+    if (prof.ok) return true;
+  } catch {}
+  return false;
 }
