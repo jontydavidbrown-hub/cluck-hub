@@ -1,62 +1,57 @@
 import { useMemo, useState } from "react";
 import { useServerState } from "../lib/serverState";
 
-// Adjust fields to taste
-type DailyEntry = {
-  id: string;
-  date: string;       // ISO date
-  shed: string;
-  tempAM?: number | null;
-  tempPM?: number | null;
-  mortalities?: number | null;
-  comments?: string;
-};
+type Mort = { shed: string; date: string; deads: number; runtCulls: number; legCulls: number };
 
-function uid() {
-  return Math.random().toString(36).slice(2, 10);
-}
-function todayISO() {
-  return new Date().toISOString().slice(0, 10);
-}
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+function useQuery() { return new URLSearchParams(window.location.search); }
 
 export default function DailyLog() {
-  const { state: log, setState: setLog, loading, synced } =
-    useServerState<DailyEntry[]>("dailyLog", []);
+  // sheds come from Setup (server-synced)
+  const { state: sheds } = useServerState<string[]>("sheds", []);
 
-  const [form, setForm] = useState<DailyEntry>({
-    id: "",
-    date: todayISO(),
-    shed: "",
-    tempAM: null,
-    tempPM: null,
-    mortalities: null,
-    comments: "",
-  });
+  // daily entries (server-synced)
+  const { state: entries, setState: setEntries, loading, synced } =
+    useServerState<Mort[]>("dailyLog", []);
+
+  const q = useQuery();
+  const [shed, setShed] = useState("");
+  const [date, setDate] = useState(todayISO());
+  const [deads, setDeads] = useState<number | "">("");
+  const [runt, setRunt] = useState<number | "">("");
+  const [leg, setLeg] = useState<number | "">("");
+
+  // default shed from query (?shed=...) or first shed
+  const initialShed = useMemo(() => q.get("shed") || (sheds[0] ?? ""), [q, sheds]);
+  useMemo(() => { if (!shed && initialShed) setShed(initialShed); }, [shed, initialShed]);
 
   const sorted = useMemo(
-    () =>
-      [...log].sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0)),
-    [log]
+    () => [...entries].sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0)),
+    [entries]
   );
 
-  function addEntry() {
-    if (!form.shed) return;
-    const entry: DailyEntry = { ...form, id: uid() };
-    setLog([...log, entry]);
-    setForm({
-      id: "",
-      date: todayISO(),
-      shed: "",
-      tempAM: null,
-      tempPM: null,
-      mortalities: null,
-      comments: "",
-    });
+  function add() {
+    if (!shed || !date) return;
+    const m: Mort = {
+      shed,
+      date,
+      deads: Number(deads || 0),
+      runtCulls: Number(runt || 0),
+      legCulls: Number(leg || 0),
+    };
+    setEntries([...entries, m]);
+    setDeads(""); setRunt(""); setLeg("");
   }
 
-  function removeEntry(id: string) {
-    setLog(log.filter((e) => e.id !== id));
+  function remove(idx: number) {
+    const next = entries.slice(); next.splice(idx, 1); setEntries(next);
   }
+
+  const totals = useMemo(() => {
+    const t = { deads: 0, runtCulls: 0, legCulls: 0 };
+    for (const e of entries) { t.deads += e.deads; t.runtCulls += e.runtCulls; t.legCulls += e.legCulls; }
+    return t;
+  }, [entries]);
 
   return (
     <div className="space-y-6">
@@ -69,59 +64,17 @@ export default function DailyLog() {
         )}
       </header>
 
-      {/* Entry form */}
-      <div className="grid gap-3 md:grid-cols-7 bg-white p-4 border rounded-xl">
-        <input
-          type="date"
-          value={form.date}
-          onChange={(e) => setForm({ ...form, date: e.target.value })}
-          className="border rounded p-2 md:col-span-1"
-        />
-        <input
-          placeholder="Shed"
-          value={form.shed}
-          onChange={(e) => setForm({ ...form, shed: e.target.value })}
-          className="border rounded p-2 md:col-span-1"
-        />
-        <input
-          placeholder="Temp AM"
-          type="number"
-          value={form.tempAM ?? ""}
-          onChange={(e) =>
-            setForm({ ...form, tempAM: e.target.value ? Number(e.target.value) : null })
-          }
-          className="border rounded p-2 md:col-span-1"
-        />
-        <input
-          placeholder="Temp PM"
-          type="number"
-          value={form.tempPM ?? ""}
-          onChange={(e) =>
-            setForm({ ...form, tempPM: e.target.value ? Number(e.target.value) : null })
-          }
-          className="border rounded p-2 md:col-span-1"
-        />
-        <input
-          placeholder="Mortalities"
-          type="number"
-          value={form.mortalities ?? ""}
-          onChange={(e) =>
-            setForm({
-              ...form,
-              mortalities: e.target.value ? Number(e.target.value) : null,
-            })
-          }
-          className="border rounded p-2 md:col-span-1"
-        />
-        <input
-          placeholder="Comments"
-          value={form.comments ?? ""}
-          onChange={(e) => setForm({ ...form, comments: e.target.value })}
-          className="border rounded p-2 md:col-span-1"
-        />
-        <button onClick={addEntry} className="rounded-lg bg-slate-900 text-white px-3 py-2 md:col-span-1">
-          Add
-        </button>
+      {/* Form */}
+      <div className="grid gap-3 md:grid-cols-6 bg-white p-4 border rounded-xl">
+        <select value={shed} onChange={(e) => setShed(e.target.value)} className="border rounded p-2">
+          <option value="">Select shed</option>
+          {sheds.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="border rounded p-2" />
+        <input placeholder="Deads" type="number" value={deads} onChange={(e) => setDeads(e.target.value === "" ? "" : Number(e.target.value))} className="border rounded p-2" />
+        <input placeholder="Runt culls" type="number" value={runt} onChange={(e) => setRunt(e.target.value === "" ? "" : Number(e.target.value))} className="border rounded p-2" />
+        <input placeholder="Leg culls" type="number" value={leg} onChange={(e) => setLeg(e.target.value === "" ? "" : Number(e.target.value))} className="border rounded p-2" />
+        <button onClick={add} className="rounded-lg bg-slate-900 text-white px-3 py-2">Add</button>
       </div>
 
       {/* Table */}
@@ -131,37 +84,38 @@ export default function DailyLog() {
             <tr>
               <th className="p-3 border-b">Date</th>
               <th className="p-3 border-b">Shed</th>
-              <th className="p-3 border-b">Temp AM</th>
-              <th className="p-3 border-b">Temp PM</th>
-              <th className="p-3 border-b">Mortalities</th>
-              <th className="p-3 border-b">Comments</th>
+              <th className="p-3 border-b">Deads</th>
+              <th className="p-3 border-b">Runt culls</th>
+              <th className="p-3 border-b">Leg culls</th>
               <th className="p-3 border-b"></th>
             </tr>
           </thead>
           <tbody>
-            {sorted.map((e) => (
-              <tr key={e.id} className="border-b last:border-none">
+            {sorted.map((e, i) => (
+              <tr key={i} className="border-b last:border-none">
                 <td className="p-3">{e.date}</td>
                 <td className="p-3">{e.shed}</td>
-                <td className="p-3">{e.tempAM ?? "-"}</td>
-                <td className="p-3">{e.tempPM ?? "-"}</td>
-                <td className="p-3">{e.mortalities ?? "-"}</td>
-                <td className="p-3">{e.comments ?? "-"}</td>
+                <td className="p-3">{e.deads}</td>
+                <td className="p-3">{e.runtCulls}</td>
+                <td className="p-3">{e.legCulls}</td>
                 <td className="p-3 text-right">
-                  <button onClick={() => removeEntry(e.id)} className="text-red-600 hover:underline">
-                    remove
-                  </button>
+                  <button onClick={() => remove(i)} className="text-red-600 hover:underline">remove</button>
                 </td>
               </tr>
             ))}
             {!sorted.length && (
-              <tr>
-                <td className="p-6 text-slate-500" colSpan={7}>
-                  No log entries yet.
-                </td>
-              </tr>
+              <tr><td className="p-6 text-slate-500" colSpan={6}>No entries yet.</td></tr>
             )}
           </tbody>
+          <tfoot>
+            <tr className="bg-slate-50 font-medium">
+              <td className="p-3" colSpan={2}>Totals</td>
+              <td className="p-3">{totals.deads}</td>
+              <td className="p-3">{totals.runtCulls}</td>
+              <td className="p-3">{totals.legCulls}</td>
+              <td className="p-3" />
+            </tr>
+          </tfoot>
         </table>
       </div>
     </div>
