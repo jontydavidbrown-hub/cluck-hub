@@ -1,7 +1,7 @@
-// PostCSS config (CommonJS)
+// PostCSS config for Tailwind v4 (CommonJS)
 module.exports = {
   plugins: {
-    tailwindcss: {},
+    "@tailwindcss/postcss": {},
     autoprefixer: {}
   }
 };
