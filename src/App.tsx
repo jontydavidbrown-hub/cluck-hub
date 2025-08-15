@@ -2,16 +2,31 @@ import { Outlet, NavLink } from "react-router-dom";
 import { useFarm } from "./lib/FarmContext";
 
 function HeaderFarmSelector() {
-  const { farms, farmId, setFarmId, createFarm } = useFarm();
+  const { farms = [], farmId, setFarmId, createFarm } = useFarm() as any;
+
+  // If farms aren’t initialised yet, don’t render the selector (prevents e.map crash)
+  if (!Array.isArray(farms) || farms.length === 0) return null;
+
   return (
     <div className="flex items-center gap-2">
-      <select className="border rounded px-2 py-1" value={farmId ?? ""} onChange={(e) => setFarmId(e.target.value)}>
-        {farms.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+      <select
+        className="border rounded px-2 py-1"
+        value={farmId ?? (farms[0]?.id ?? "")}
+        onChange={(e) => setFarmId(e.target.value)}
+      >
+        {farms.map((f: any) => (
+          <option key={f.id} value={f.id}>{f.name}</option>
+        ))}
       </select>
-      <button className="text-sm underline" onClick={async () => {
-        const name = prompt("New farm name?");
-        if (name) await createFarm(name);
-      }}>+ New Farm</button>
+      <button
+        className="text-sm underline"
+        onClick={async () => {
+          const name = prompt("New farm name?");
+          if (name && createFarm) await createFarm(name);
+        }}
+      >
+        + New Farm
+      </button>
     </div>
   );
 }
