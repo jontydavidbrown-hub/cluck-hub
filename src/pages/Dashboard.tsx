@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useMemo } from "react";
 import { useServerState } from "../lib/serverState";
+import { DEFAULT_SETTINGS, normalizeSettings } from "../lib/defaults";
 
 type Shed = {
   id: string;
@@ -20,7 +21,9 @@ function daysBetween(isoStart: string, isoEnd: string) {
 
 export default function Dashboard() {
   const { state: shedsRaw } = useServerState<any>("sheds", []);
-  const { state: settings } = useServerState<Settings>("settings", { batchLengthDays: 49 });
+  // ✅ Always load settings with defaults and normalize before use
+  const { state: settingsRaw } = useServerState<Settings>("settings", DEFAULT_SETTINGS);
+  const settings = normalizeSettings(settingsRaw);
 
   const sheds: Shed[] = useMemo(() => {
     if (!Array.isArray(shedsRaw)) return [];
@@ -31,7 +34,7 @@ export default function Dashboard() {
     );
   }, [shedsRaw]);
 
-  const batchDays = Math.max(1, Number(settings.batchLengthDays || 49));
+  const batchDays = Math.max(1, Number(settings.batchLengthDays)); // never undefined now
   const today = new Date();
   const todayISO = today.toISOString().slice(0, 10);
 
@@ -82,9 +85,9 @@ export default function Dashboard() {
               {/* Actions */}
               <div className="mt-3 flex flex-wrap gap-2">
                 <Link
-                    to={`/weights?shed=${encodeURIComponent(s.name)}`}
-                    className="px-3 py-2 rounded-lg bg-slate-900 text-white text-sm"
-                  >
+                  to={`/weights?shed=${encodeURIComponent(s.name)}`}
+                  className="px-3 py-2 rounded-lg bg-slate-900 text-white text-sm"
+                >
                   Add weight
                 </Link>
                 <Link
