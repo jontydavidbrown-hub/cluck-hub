@@ -9,35 +9,41 @@ type Mort = {
   legCulls: number;
 };
 
-type Shed = { id: string; name: string };
-
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
 export default function DailyLog() {
+  // shed names from Setup
   const { state: shedsRaw } = useServerState<any>("sheds", []);
   const shedNames = useMemo<string[]>(() => {
     if (!Array.isArray(shedsRaw)) return [];
     return shedsRaw.map((x: any) => (typeof x === "string" ? x : x?.name)).filter(Boolean);
   }, [shedsRaw]);
 
+  // entries
   const { state: entries, setState: setEntries, loading, synced } =
     useServerState<Mort[]>("dailyLog", []);
 
+  // add form
   const [shed, setShed] = useState("");
   const [date, setDate] = useState(todayISO());
   const [deads, setDeads] = useState<number | "">("");
   const [runt, setRunt] = useState<number | "">("");
   const [leg, setLeg] = useState<number | "">("");
 
-  // Preselect shed from ?shed=
+  // edit row state
+  const [editIndex, setEditIndex] = useState<number | null>(null);
+  const [eShed, setEShed] = useState("");
+  const [eDate, setEDate] = useState(todayISO());
+  const [eDeads, setEDeads] = useState<number | "">("");
+  const [eRunt, setERunt] = useState<number | "">("");
+  const [eLeg, setELeg] = useState<number | "">("");
+
+  // preselect shed from ?shed=
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const target = params.get("shed");
-    if (target && shedNames.includes(target)) {
-      setShed(target);
-    } else if (!shed && shedNames.length) {
-      setShed(shedNames[0]);
-    }
+    if (target && shedNames.includes(target)) setShed(target);
+    else if (!shed && shedNames.length) setShed(shedNames[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shedNames.join("|")]);
 
@@ -59,8 +65,33 @@ export default function DailyLog() {
     setDeads(""); setRunt(""); setLeg("");
   }
 
-  function remove(idx: number) {
-    const next = entries.slice(); next.splice(idx, 1); setEntries(next);
+  function beginEdit(i: number, row: Mort) {
+    setEditIndex(i);
+    setEShed(row.shed);
+    setEDate(row.date);
+    setEDeads(row.deads);
+    setERunt(row.runtCulls);
+    setELeg(row.legCulls);
+  }
+  function saveEdit(i: number) {
+    const next = entries.slice();
+    next[i] = {
+      shed: eShed || "",
+      date: eDate || todayISO(),
+      deads: Number(eDeads || 0),
+      runtCulls: Number(eRunt || 0),
+      legCulls: Number(eLeg || 0),
+    };
+    setEntries(next);
+    cancelEdit();
+  }
+  function cancelEdit() {
+    setEditIndex(null);
+    setEShed(""); setEDate(todayISO()); setEDeads(""); setERunt(""); setELeg("");
+  }
+
+  function remove(i: number) {
+    const next = entries.slice(); next.splice(i, 1); setEntries(next);
   }
 
   const totals = useMemo(() => {
@@ -80,7 +111,7 @@ export default function DailyLog() {
         )}
       </header>
 
-      {/* Form */}
+      {/* Add form */}
       <div className="grid gap-3 md:grid-cols-6 bg-white p-4 border rounded-xl">
         <select value={shed} onChange={(e) => setShed(e.target.value)} className="border rounded p-2">
           <option value="">Select shed</option>
@@ -93,7 +124,7 @@ export default function DailyLog() {
         <button onClick={add} className="rounded-lg bg-slate-900 text-white px-3 py-2">Add</button>
       </div>
 
-      {/* Table */}
+      {/* Table with inline editing */}
       <div className="overflow-x-auto">
         <table className="min-w-full bg-white border rounded-xl overflow-hidden">
           <thead className="bg-slate-50 text-left">
@@ -107,18 +138,53 @@ export default function DailyLog() {
             </tr>
           </thead>
           <tbody>
-            {sorted.map((e, i) => (
-              <tr key={i} className="border-b last:border-none">
-                <td className="p-3">{e.date}</td>
-                <td className="p-3">{e.shed}</td>
-                <td className="p-3">{e.deads}</td>
-                <td className="p-3">{e.runtCulls}</td>
-                <td className="p-3">{e.legCulls}</td>
-                <td className="p-3 text-right">
-                  <button onClick={() => remove(i)} className="text-red-600 hover:underline">remove</button>
-                </td>
-              </tr>
-            ))}
+            {sorted.map((row, i) => {
+              const isEditing = editIndex === i;
+              return (
+                <tr key={i} className="border-b last:border-none">
+                  <td className="p-3">
+                    {isEditing ? (
+                      <input type="date" value={eDate} onChange={(e) => setEDate(e.target.value)} className="border rounded p-2" />
+                    ) : row.date}
+                  </td>
+                  <td className="p-3">
+                    {isEditing ? (
+                      <select value={eShed} onChange={(e) => setEShed(e.target.value)} className="border rounded p-2">
+                        {shedNames.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    ) : row.shed}
+                  </td>
+                  <td className="p-3">
+                    {isEditing ? (
+                      <input type="number" value={eDeads} onChange={(e) => setEDeads(e.target.value === "" ? "" : Number(e.target.value))} className="border rounded p-2 w-24" />
+                    ) : row.deads}
+                  </td>
+                  <td className="p-3">
+                    {isEditing ? (
+                      <input type="number" value={eRunt} onChange={(e) => setERunt(e.target.value === "" ? "" : Number(e.target.value))} className="border rounded p-2 w-24" />
+                    ) : row.runtCulls}
+                  </td>
+                  <td className="p-3">
+                    {isEditing ? (
+                      <input type="number" value={eLeg} onChange={(e) => setELeg(e.target.value === "" ? "" : Number(e.target.value))} className="border rounded p-2 w-24" />
+                    ) : row.legCulls}
+                  </td>
+                  <td className="p-3 text-right">
+                    {isEditing ? (
+                      <div className="flex gap-2 justify-end">
+                        <button onClick={() => saveEdit(i)} className="rounded-lg bg-slate-900 text-white px-3 py-2 text-sm">Save</button>
+                        <button onClick={cancelEdit} className="rounded-lg border px-3 py-2 text-sm">Cancel</button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-3 justify-end">
+                        <button onClick={() => beginEdit(i, row)} className="text-slate-700 hover:underline text-sm">edit</button>
+                        <button onClick={() => remove(i)} className="text-red-600 hover:underline text-sm">remove</button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
             {!sorted.length && (
               <tr><td className="p-6 text-slate-500" colSpan={6}>No entries yet.</td></tr>
             )}
