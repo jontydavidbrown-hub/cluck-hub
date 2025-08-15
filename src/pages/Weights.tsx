@@ -116,3 +116,75 @@ export default function Weights() {
           placeholder="Total weight (kg)"
           type="number"
           step="0.01"
+          value={form.totalWeightKg}
+          onChange={(e) =>
+            setForm({ ...form, totalWeightKg: Number(e.target.value || 0) })
+          }
+          className="border rounded p-2 md:col-span-1"
+        />
+        <button onClick={addRecord} className="rounded-lg bg-slate-900 text-white px-3 py-2 md:col-span-1">
+          Add
+        </button>
+        <input
+          placeholder="Notes (optional)"
+          value={form.notes ?? ""}
+          onChange={(e) => setForm({ ...form, notes: e.target.value })}
+          className="border rounded p-2 md:col-span-6"
+        />
+      </div>
+
+      {/* Groups by date */}
+      <div className="space-y-4">
+        {byDate.map(([date, arr]) => (
+          <div key={date} className="bg-white border rounded-xl overflow-hidden">
+            <div className="px-4 py-3 bg-slate-50 border-b font-semibold">{date}</div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full">
+                <thead className="text-left">
+                  <tr>
+                    <th className="p-3 border-b">Shed</th>
+                    <th className="p-3 border-b">Buckets</th>
+                    <th className="p-3 border-b">Birds/Bucket</th>
+                    <th className="p-3 border-b">Total Birds</th>
+                    <th className="p-3 border-b">Total (kg)</th>
+                    <th className="p-3 border-b">Avg per bird (g)</th>
+                    <th className="p-3 border-b">Notes</th>
+                    <th className="p-3 border-b"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {arr.map((r) => (
+                    <tr key={r.id} className="border-b last:border-none">
+                      <td className="p-3">{r.shed}</td>
+                      <td className="p-3">{r.buckets}</td>
+                      <td className="p-3">{r.birdsPerBucket}</td>
+                      <td className="p-3">{r.totalBirds}</td>
+                      <td className="p-3">{r.totalWeightKg.toFixed(2)}</td>
+                      <td className="p-3">{Math.round(r.avgPerBird)}</td>
+                      <td className="p-3">{r.notes ?? "-"}</td>
+                      <td className="p-3 text-right">
+                        <button onClick={() => removeRecord(r.id)} className="text-red-600 hover:underline">
+                          remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {!arr.length && (
+                    <tr>
+                      <td className="p-6 text-slate-500" colSpan={8}>
+                        No records.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+        {!byDate.length && (
+          <div className="text-slate-500">No weight records yet. Add one above.</div>
+        )}
+      </div>
+    </div>
+  );
+}
