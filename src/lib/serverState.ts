@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 import { useSyncExternalStore } from "react";
 import { DEFAULT_SETTINGS, normalizeSettings, type AppSettings } from "./defaults";
 
@@ -11,14 +11,11 @@ export type ServerState = {
 
 const STORAGE_KEY = "cluckhub:state:v1";
 
-let state: ServerState = safeLoad();
-
 type Listener = () => void;
 const listeners = new Set<Listener>();
 
-function emit() {
-  for (const l of Array.from(listeners)) l();
-}
+let state: ServerState = safeLoad();
+state.settings = normalizeSettings(state.settings);
 
 function safeLoad(): ServerState {
   try {
@@ -42,15 +39,18 @@ function persist(next: ServerState) {
   } catch {}
 }
 
-// ensure normalized on boot
-(() => { state.settings = normalizeSettings(state.settings); })();
+function emit() {
+  for (const l of Array.from(listeners)) l();
+}
 
 export function getState(): ServerState {
   state.settings = normalizeSettings(state.settings);
   return state;
 }
 
-export function setState(patch: Partial<ServerState> | ((s: ServerState) => Partial<ServerState>)) {
+export function setState(
+  patch: Partial<ServerState> | ((s: ServerState) => Partial<ServerState>)
+) {
   const base = getState();
   const delta = typeof patch === "function" ? patch(base) : patch;
   const next: ServerState = {
