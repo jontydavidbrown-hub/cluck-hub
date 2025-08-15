@@ -6,6 +6,7 @@ const links = [
   { to: "/daily-log", label: "Daily Log" },
   { to: "/weights", label: "Weights" },
   { to: "/feed-silos", label: "Feed & Silos" },
+  { to: "/water", label: "Water" },
   { to: "/reminders", label: "Reminders" },
   { to: "/setup", label: "Setup" },
   { to: "/user", label: "User" },
@@ -18,7 +19,7 @@ export default function App() {
   // Close drawer on route change
   useEffect(() => { setOpen(false); }, [loc.pathname]);
 
-  // Swipe gesture (mobile): open from left edge, close by swiping left
+  // Swipe gesture (mobile)
   useSwipeDrawer(open, setOpen);
 
   return (
@@ -136,11 +137,11 @@ function useSwipeDrawer(open: boolean, setOpen: (v: boolean) => void) {
       startX.current = t.clientX;
       startY.current = t.clientY;
 
-      // If drawer closed, only track if started from left edge
+      // If closed, track only if swipe starts from left edge (<=24px)
       if (!open && t.clientX <= 24) {
         tracking.current = "open";
       }
-      // If drawer open, allow swipe left anywhere on screen to close
+      // If open, track a left swipe anywhere
       else if (open) {
         tracking.current = "close";
       } else {
@@ -183,4 +184,3 @@ function useSwipeDrawer(open: boolean, setOpen: (v: boolean) => void) {
     };
   }, [open, setOpen]);
 }
-
