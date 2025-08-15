@@ -7,13 +7,13 @@
 
 [functions]
   node_bundler = "esbuild"
-  external_node_modules = ["jsonwebtoken", "@netlify/blobs", "resend"]
+  external_node_modules = ["jsonwebtoken", "@netlify/blobs", "resend", "bcryptjs"]
 
 [functions."cron-reminders"]
   # 7:00 AM Brisbane (AEST=UTC+10) -> 21:00 UTC previous day
   schedule = "0 21 * * *"
 
-# SPA fallback only (do NOT add any /.netlify/functions redirects)
+# SPA fallback only
 [[redirects]]
   from = "/*"
   to = "/index.html"
