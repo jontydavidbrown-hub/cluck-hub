@@ -1,15 +1,28 @@
 [build]
-  command = "npm run build"
+  command = "vite build"
   publish = "dist"
-  functions = "netlify/functions"
 
 [build.environment]
-  SECRETS_SCAN_OMIT_KEYS = "BLOB_STORE"
+  # Pin Node so Netlify and local dev match your dependencies
+  NODE_VERSION = "20.12.2"
 
 [functions]
   node_bundler = "esbuild"
-  external_node_modules = ["@netlify/blobs","bcryptjs","jsonwebtoken"]
+  # Let Netlify bundle these server deps for the functions we added
+  external_node_modules = ["jsonwebtoken", "@netlify/blobs", "resend"]
 
+# Scheduled reminders email (07:00 AEST = 21:00 UTC previous day)
+[functions."cron-reminders"]
+  schedule = "0 21 * * *"
+
+# Keep function routes working during SPA redirects
+[[redirects]]
+  from = "/.netlify/functions/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+  force = true
+
+# Single Page App fallback
 [[redirects]]
   from = "/*"
   to = "/index.html"

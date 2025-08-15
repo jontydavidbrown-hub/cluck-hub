@@ -1,82 +1,64 @@
-// src/lib/serverState.ts
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from "react";
+import { useFarm } from "./FarmContext";
 
-type Options<T> = {
-  /** Debounce ms before saving to server after setState */
-  debounce?: number
-  /** Optional transform/validate before save */
-  sanitize?: (v: T) => T
-}
+type Listener<T> = (v: T) => void;
+const cache = new Map<string, any>();
+const listeners = new Map<string, Set<Listener<any>>>();
+const debounces = new Map<string, number>();
 
-/**
- * useServerState(key, initial)
- * - Loads JSON from server at `/.netlify/functions/data?key=${key}`
- * - Allows local updates, debounced POST back to the server
- * - Falls back to initial if nothing stored
- */
-export function useServerState<T>(key: string, initial: T, opts: Options<T> = {}) {
-  const { debounce = 500, sanitize } = opts
-  const [state, setState] = useState<T>(initial)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [synced, setSynced] = useState(false)
-  const saveTimer = useRef<number | null>(null)
+function cacheKey(farmId: string, key: string) { return `${farmId}::${key}`; }
 
-  // Load once
+export function useServerState<T>(key: string, initial: T): [T, (v: T) => void, boolean] {
+  const { farmId } = useFarm();
+  const [state, setState] = useState<T>(initial);
+  const [loading, setLoading] = useState<boolean>(true);
+
   useEffect(() => {
-    let alive = true
-    ;(async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const res = await fetch(`/.netlify/functions/data?key=${encodeURIComponent(key)}`, {
-          credentials: 'include',
-        })
-        if (!res.ok) throw new Error(`GET failed: ${res.status}`)
-        const body = await res.json()
-        if (!alive) return
-        if (body?.value != null) {
-          setState(body.value as T)
-        } else {
-          setState(initial)
-        }
-      } catch (e: any) {
-        if (alive) setError(e?.message || 'Load error')
-      } finally {
-        if (alive) setLoading(false)
+    if (!farmId) return;
+    const k = cacheKey(farmId, key);
+    const listener: Listener<T> = (v) => setState(v);
+
+    if (!listeners.has(k)) listeners.set(k, new Set());
+    listeners.get(k)!.add(listener);
+
+    let alive = true;
+    (async () => {
+      if (cache.has(k)) {
+        setState(cache.get(k));
+        setLoading(false);
       }
-    })()
+      const res = await fetch(`/.netlify/functions/farmData/${farmId}/${key}`, { credentials: "include" });
+      const j = await res.json();
+      if (!alive) return;
+      if (j?.ok) { cache.set(k, j.data ?? initial); setState(j.data ?? initial); }
+      setLoading(false);
+    })();
+
     return () => {
-      alive = false
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key])
+      alive = false;
+      listeners.get(k)?.delete(listener);
+    };
+  }, [farmId, key]);
 
-  // Debounced save whenever state changes (after initial load)
-  const firstSave = useRef(true)
-  useEffect(() => {
-    if (loading) return
-    if (firstSave.current) {
-      firstSave.current = false
-      return
-    }
-    if (saveTimer.current) window.clearTimeout(saveTimer.current)
-    saveTimer.current = window.setTimeout(async () => {
-      try {
-        const body = sanitize ? sanitize(state) : state
-        const res = await fetch('/.netlify/functions/data?key=' + encodeURIComponent(key), {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-        })
-        setSynced(res.ok)
-      } catch {
-        setSynced(false)
-      }
-    }, debounce) as unknown as number
-    return () => { if (saveTimer.current) window.clearTimeout(saveTimer.current) }
-  }, [state, key, debounce, sanitize, loading])
+  const setServer = (v: T) => {
+    if (!farmId) return;
+    const k = cacheKey(farmId, key);
+    cache.set(k, v);
+    listeners.get(k)?.forEach(fn => fn(v));
+    setState(v);
 
-  return { state, setState, loading, error, synced }
+    if (debounces.has(k)) window.clearTimeout(debounces.get(k)!);
+    const t = window.setTimeout(async () => {
+      await fetch(`/.netlify/functions/farmData/${farmId}/${key}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(v)
+      });
+      debounces.delete(k);
+    }, 400);
+    debounces.set(k, t);
+  };
+
+  return [state, setServer, loading];
 }
