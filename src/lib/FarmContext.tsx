@@ -14,7 +14,6 @@ type FarmContextValue = {
   state: any;
   setState: typeof setState;
 
-  // farm management expected by pages
   farms: Farm[];
   createFarm: (name: string) => Promise<Farm>;
   inviteMember: (farmId: string, email: string, role: Member["role"]) => Promise<void>;
@@ -25,22 +24,18 @@ type FarmContextValue = {
 
 const FarmContext = createContext<FarmContextValue | undefined>(undefined);
 
-function uid() {
-  return Math.random().toString(36).slice(2, 10);
-}
+function uid() { return Math.random().toString(36).slice(2, 10); }
 
 export function FarmProvider({ children }: PropsWithChildren) {
-  const [state] = useServerState();
+  const state = useServerState();
 
   const value = useMemo<FarmContextValue>(() => {
     const s = getState();
 
-    // Ensure farms exist so .map() never explodes
-    const farms: Farm[] = Array.isArray(s.farms) ? s.farms : [
-      { id: "default", name: "My Farm", members: [] },
-    ];
-    if (!Array.isArray(s.farms)) {
-      setState({ farms, farmId: farms[0].id });
+    let farms: Farm[] = Array.isArray(s.farms) ? s.farms as any : [];
+    if (farms.length === 0) {
+      farms = [{ id: "default", name: "My Farm", members: [] }];
+      setState({ farms, farmId: "default" });
     }
 
     async function createFarm(name: string): Promise<Farm> {
@@ -90,7 +85,7 @@ export function FarmProvider({ children }: PropsWithChildren) {
       inviteMember,
       changeRole,
       removeMember,
-      refresh: () => setState((x) => ({ ...x })), // no-op trigger to refresh subscribers
+      refresh: () => setState((x) => ({ ...x })),
     };
   }, [state]);
 
@@ -103,6 +98,4 @@ export function useFarm() {
   return ctx;
 }
 
-export function getFarmState() {
-  return getState();
-}
+export function getFarmState() { return getState(); }
