@@ -14,6 +14,7 @@ import Analytics from "./pages/Analytics";
 import Members from "./pages/Members";
 import { FarmProvider } from "./lib/FarmContext";
 import ErrorBoundary from "./ErrorBoundary";
+import "./index.css";
 
 const router = createBrowserRouter([
   {
