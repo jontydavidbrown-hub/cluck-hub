@@ -1,228 +1,118 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { getJSON, setJSON, nowIso } from "../lib/storage";
-import { generateWeightsPdf } from "../lib/pdf";
+import { useMemo, useState } from "react";
+import { useServerState } from "../lib/serverState";
 
-type ShedWeights = {
+type WeightRec = {
+  id: string;
+  date: string;      // ISO date
   shed: string;
+  buckets: number;   // number of buckets weighed
   birdsPerBucket: number;
-  buckets: number[]; // kg per bucket
+  totalWeightKg: number; // total combined weight of those buckets (kg)
   notes?: string;
-  createdAt: string; // ISO
 };
 
-type WeightsByShed = Record<string, ShedWeights[]>;
-
-const SHEDS_KEY = "sheds";
-const WEIGHTS_KEY = "weightsByShed";
+function uid() {
+  return Math.random().toString(36).slice(2, 10);
+}
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
 
 export default function Weights() {
-  const sheds = getJSON<string[]>(SHEDS_KEY, []);
-  const [shed, setShed] = useState(sheds[0] || "");
-  const [birdsPerBucket, setBirdsPerBucket] = useState<number>(10);
-  // store possibly-empty numbers as (number | null)
-  const [buckets, setBuckets] = useState<Array<number | null>>([]);
-  const [notes, setNotes] = useState("");
+  const { state: records, setState: setRecords, loading, synced } =
+    useServerState<WeightRec[]>("weights", []);
 
-  // refs for inputs to manage focus when adding via Enter
-  const inputRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const [form, setForm] = useState<WeightRec>({
+    id: "",
+    date: todayISO(),
+    shed: "",
+    buckets: 1,
+    birdsPerBucket: 10,
+    totalWeightKg: 0,
+    notes: "",
+  });
 
-  useEffect(() => {
-    if (!shed && sheds.length) setShed(sheds[0]);
-  }, [sheds, shed]);
-
-  const totals = useMemo(() => {
-    const clean = buckets.map((b) => (typeof b === "number" && !isNaN(b) ? b : 0));
-    const totalKg = clean.reduce((a, b) => a + b, 0);
-    const totalBirds = (birdsPerBucket || 0) * (clean.length || 0);
-    const avg = totalBirds ? totalKg / totalBirds : 0;
-    return { totalKg, totalBirds, avg };
-  }, [buckets, birdsPerBucket]);
-
-  function addBucket(value?: number | null) {
-    setBuckets((prev) => [...prev, value ?? null]);
-    // focus the newly added input on next tick
-    requestAnimationFrame(() => {
-      const idx = buckets.length; // new index
-      inputRefs.current[idx]?.focus();
-      inputRefs.current[idx]?.select();
+  function addRecord() {
+    if (!form.shed || !form.buckets || !form.birdsPerBucket) return;
+    const rec: WeightRec = { ...form, id: uid() };
+    setRecords([...records, rec]);
+    setForm({
+      id: "",
+      date: todayISO(),
+      shed: "",
+      buckets: 1,
+      birdsPerBucket: 10,
+      totalWeightKg: 0,
+      notes: "",
     });
   }
-  function updateBucket(i: number, vStr: string) {
-    const v = vStr === "" ? null : Number(vStr);
-    setBuckets((prev) => prev.map((x, idx) => (idx === i ? (isNaN(v as number) ? null : v) : x)));
-  }
-  function deleteBucket(i: number) {
-    setBuckets((prev) => prev.filter((_, idx) => idx !== i));
-    // tidy refs
-    inputRefs.current.splice(i, 1);
-  }
-  function clearAll() {
-    setBuckets([]);
-    setNotes("");
+
+  function removeRecord(id: string) {
+    setRecords(records.filter((r) => r.id !== id));
   }
 
-  function saveEntry() {
-    if (!shed) return;
-    const cleanBuckets = buckets.map((b) => (typeof b === "number" && !isNaN(b) ? b : 0));
-    const rec: ShedWeights = {
-      shed,
-      birdsPerBucket,
-      buckets: cleanBuckets,
-      notes,
-      createdAt: nowIso(),
-    };
-    const db = getJSON<WeightsByShed>(WEIGHTS_KEY, {});
-    db[shed] = [...(db[shed] || []), rec];
-    setJSON(WEIGHTS_KEY, db);
-  }
+  const withCalcs = useMemo(
+    () =>
+      records.map((r) => {
+        const totalBirds = r.buckets * r.birdsPerBucket;
+        const avgPerBird = totalBirds ? r.totalWeightKg * 1000 / totalBirds : 0; // grams
+        return { ...r, totalBirds, avgPerBird };
+      }),
+    [records]
+  );
 
-  function exportPdf() {
-    if (!shed) return;
-    const cleanBuckets = buckets.map((b) => (typeof b === "number" && !isNaN(b) ? b : 0));
-    generateWeightsPdf({
-      shed,
-      birdsPerBucket,
-      buckets: cleanBuckets,
-      notes,
-      createdAt: nowIso(),
-    });
-  }
+  const byDate = useMemo(() => {
+    const groups = new Map<string, typeof withCalcs>();
+    for (const r of withCalcs) {
+      const arr = groups.get(r.date) || [];
+      arr.push(r);
+      groups.set(r.date, arr);
+    }
+    return Array.from(groups.entries()).sort(([a], [b]) => (a > b ? -1 : 1));
+  }, [withCalcs]);
 
   return (
-    <div className="max-w-3xl mx-auto p-4 space-y-4">
-      <h1 className="text-2xl font-semibold">Weights</h1>
+    <div className="space-y-6">
+      <header className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Weights</h1>
+        {!loading && (
+          <span className={`text-xs px-2 py-1 rounded border ${synced ? "text-green-700 border-green-200 bg-green-50" : "text-amber-700 border-amber-200 bg-amber-50"}`}>
+            {synced ? "Synced" : "Saving…"}
+          </span>
+        )}
+      </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="space-y-1">
-          <label className="text-sm font-medium">Shed</label>
-          <select
-            value={shed}
-            onChange={(e) => setShed(e.target.value)}
-            className="border rounded px-3 py-2 w-full"
-          >
-            {sheds.length === 0 && <option value="">No sheds configured</option>}
-            {sheds.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-sm font-medium">Birds per bucket</label>
-          <input
-            type="number"
-            min={0}
-            value={birdsPerBucket}
-            onChange={(e) => setBirdsPerBucket(parseInt(e.target.value || "0"))}
-            className="border rounded px-3 py-2 w-full"
-            placeholder="e.g. 10"
-            onFocus={(e) => e.currentTarget.select()}
-          />
-        </div>
-
-        <div className="flex items-end gap-2">
-          <button
-            type="button"
-            onClick={() => addBucket()}
-            className="border rounded px-3 py-2 w-full"
-          >
-            + Add bucket
-          </button>
-          <button
-            type="button"
-            onClick={clearAll}
-            className="border rounded px-3 py-2"
-            title="Clear inputs"
-          >
-            Reset
-          </button>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <div className="text-sm text-gray-600">Enter each bucket's total weight (kg):</div>
-        <div className="space-y-2">
-          {buckets.map((kg, i) => (
-            <div key={i} className="flex gap-2 items-center">
-              <input
-                ref={(el) => (inputRefs.current[i] = el)}
-                type="number"
-                step="0.001"
-                value={kg ?? ""}
-                placeholder="kg"
-                onFocus={(e) => e.currentTarget.select()}
-                onChange={(e) => updateBucket(i, e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    const last = i === buckets.length - 1;
-                    if (last) {
-                      addBucket();
-                    } else {
-                      inputRefs.current[i + 1]?.focus();
-                      inputRefs.current[i + 1]?.select();
-                    }
-                  }
-                }}
-                className="border rounded px-3 py-2 w-full"
-              />
-              <button
-                className="border rounded px-2 py-2"
-                onClick={() => deleteBucket(i)}
-                title="Remove"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="p-3 border rounded">
-          <div className="text-sm text-gray-600">Total buckets</div>
-          <div className="text-xl font-semibold">{buckets.length}</div>
-        </div>
-        <div className="p-3 border rounded">
-          <div className="text-sm text-gray-600">Total kg</div>
-          <div className="text-xl font-semibold">{totals.totalKg.toFixed(3)}</div>
-        </div>
-        <div className="p-3 border rounded">
-          <div className="text-sm text-gray-600">Avg / bird (kg)</div>
-          <div className="text-xl font-semibold">
-            {totals.totalBirds ? totals.avg.toFixed(4) : "-"}
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <label className="text-sm font-medium">Notes (optional)</label>
-        <textarea
-          className="border rounded px-3 py-2 w-full"
-          rows={3}
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Anything notable about this weighing session…"
-          onFocus={(e) => e.currentTarget.select()}
+      {/* Input */}
+      <div className="grid gap-3 md:grid-cols-6 bg-white p-4 border rounded-xl">
+        <input
+          type="date"
+          value={form.date}
+          onChange={(e) => setForm({ ...form, date: e.target.value })}
+          className="border rounded p-2 md:col-span-1"
         />
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className="bg-black text-white rounded px-4 py-2"
-          onClick={exportPdf}
-        >
-          Export PDF
-        </button>
-        <button
-          type="button"
-          className="border rounded px-4 py-2"
-          onClick={saveEntry}
-        >
-          Save entry
-        </button>
-      </div>
-    </div>
-  );
-}
+        <input
+          placeholder="Shed"
+          value={form.shed}
+          onChange={(e) => setForm({ ...form, shed: e.target.value })}
+          className="border rounded p-2 md:col-span-1"
+        />
+        <input
+          placeholder="Buckets"
+          type="number"
+          value={form.buckets}
+          onChange={(e) => setForm({ ...form, buckets: Number(e.target.value || 0) })}
+          className="border rounded p-2 md:col-span-1"
+        />
+        <input
+          placeholder="Birds per bucket"
+          type="number"
+          value={form.birdsPerBucket}
+          onChange={(e) =>
+            setForm({ ...form, birdsPerBucket: Number(e.target.value || 0) })
+          }
+          className="border rounded p-2 md:col-span-1"
+        />
+        <input
+          placeholder="Total weight (kg)"
+          type="number"
+          step="0.01"
