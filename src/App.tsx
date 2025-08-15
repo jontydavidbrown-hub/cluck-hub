@@ -1,5 +1,6 @@
 import { Outlet, NavLink, useLocation } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
+import CredentialLightbox from "./components/CredentialLightbox";
 
 const links = [
   { to: "/", label: "Dashboard" },
@@ -13,14 +14,41 @@ const links = [
 ];
 
 export default function App() {
-  const [open, setOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
+  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const loc = useLocation();
 
   // Close drawer on route change
-  useEffect(() => { setOpen(false); }, [loc.pathname]);
+  useEffect(() => { setDrawerOpen(false); }, [loc.pathname]);
 
   // Swipe gesture (mobile)
-  useSwipeDrawer(open, setOpen);
+  useSwipeDrawer(drawerOpen, setDrawerOpen);
+
+  // Show login if a sign-out just happened or if session is missing
+  useEffect(() => {
+    if (localStorage.getItem("forceLogin") === "1") {
+      localStorage.removeItem("forceLogin");
+      setShowLogin(true);
+    }
+    checkSession().then((email) => {
+      setSessionEmail(email);
+      if (!email) setShowLogin(true);
+    });
+  }, []);
+
+  // While the login is open, poll for session and auto-hide when logged in
+  useEffect(() => {
+    if (!showLogin) return;
+    let timer = window.setInterval(async () => {
+      const email = await checkSession();
+      if (email) {
+        setSessionEmail(email);
+        setShowLogin(false);
+      }
+    }, 1500);
+    return () => { window.clearInterval(timer); };
+  }, [showLogin]);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -30,7 +58,7 @@ export default function App() {
           <div className="flex items-center gap-3">
             <button
               className="md:hidden p-2 rounded-lg border"
-              onClick={() => setOpen(true)}
+              onClick={() => setDrawerOpen(true)}
               aria-label="Open menu"
             >
               ☰
@@ -46,28 +74,28 @@ export default function App() {
       </header>
 
       {/* Mobile slide-in sidebar + overlay */}
-      <div className={`md:hidden fixed inset-0 z-50 ${open ? "" : "pointer-events-none"}`}>
+      <div className={`md:hidden fixed inset-0 z-50 ${drawerOpen ? "" : "pointer-events-none"}`}>
         {/* overlay */}
         <div
-          className={`absolute inset-0 bg-black/40 transition-opacity ${open ? "opacity-100" : "opacity-0"}`}
-          onClick={() => setOpen(false)}
+          className={`absolute inset-0 bg-black/40 transition-opacity ${drawerOpen ? "opacity-100" : "opacity-0"}`}
+          onClick={() => setDrawerOpen(false)}
           aria-hidden="true"
         />
         {/* drawer */}
         <aside
           className={`absolute top-0 left-0 h-full w-[260px] bg-white shadow-xl border-r
-                      transition-transform duration-300 ${open ? "translate-x-0" : "-translate-x-full"}`}
+                      transition-transform duration-300 ${drawerOpen ? "translate-x-0" : "-translate-x-full"}`}
           role="dialog"
           aria-modal="true"
           aria-label="Mobile navigation"
         >
           <div className="p-4 border-b flex items-center justify-between">
             <div className="font-semibold">Menu</div>
-            <button className="p-2" onClick={() => setOpen(false)} aria-label="Close menu">✕</button>
+            <button className="p-2" onClick={() => setDrawerOpen(false)} aria-label="Close menu">✕</button>
           </div>
           <nav className="p-2">
             {links.map((l) => (
-              <MobileItem key={l.to} to={l.to} label={l.label} onClick={() => setOpen(false)} />
+              <MobileItem key={l.to} to={l.to} label={l.label} onClick={() => setDrawerOpen(false)} />
             ))}
           </nav>
         </aside>
@@ -77,6 +105,14 @@ export default function App() {
       <main className="mx-auto max-w-7xl p-4">
         <Outlet />
       </main>
+
+      {/* Login Lightbox (appears if not signed in or after sign-out) */}
+      {showLogin && (
+        <div className="fixed inset-0 z-[60]">
+          {/* The lightbox component renders its own UI; we just mount it */}
+          <CredentialLightbox />
+        </div>
+      )}
     </div>
   );
 }
@@ -137,16 +173,9 @@ function useSwipeDrawer(open: boolean, setOpen: (v: boolean) => void) {
       startX.current = t.clientX;
       startY.current = t.clientY;
 
-      // If closed, track only if swipe starts from left edge (<=24px)
-      if (!open && t.clientX <= 24) {
-        tracking.current = "open";
-      }
-      // If open, track a left swipe anywhere
-      else if (open) {
-        tracking.current = "close";
-      } else {
-        tracking.current = null;
-      }
+      if (!open && t.clientX <= 24) tracking.current = "open";
+      else if (open) tracking.current = "close";
+      else tracking.current = null;
     }
 
     function onTouchMove(e: TouchEvent) {
@@ -154,17 +183,10 @@ function useSwipeDrawer(open: boolean, setOpen: (v: boolean) => void) {
       const t = e.touches[0];
       const dx = t.clientX - startX.current;
       const dy = t.clientY - startY.current;
-      // ignore mostly vertical swipes
       if (Math.abs(dy) > 80) return;
 
-      if (tracking.current === "open" && dx > 50) {
-        setOpen(true);
-        tracking.current = null;
-      }
-      if (tracking.current === "close" && dx < -50) {
-        setOpen(false);
-        tracking.current = null;
-      }
+      if (tracking.current === "open" && dx > 50) { setOpen(true); tracking.current = null; }
+      if (tracking.current === "close" && dx < -50) { setOpen(false); tracking.current = null; }
     }
 
     function onTouchEnd() {
@@ -183,4 +205,24 @@ function useSwipeDrawer(open: boolean, setOpen: (v: boolean) => void) {
       window.removeEventListener("touchend", onTouchEnd);
     };
   }, [open, setOpen]);
+}
+
+/** Session helper */
+async function checkSession(): Promise<string | null> {
+  try {
+    const res = await fetch("/.netlify/functions/auth?action=session", { credentials: "include" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    // Try multiple shapes just in case
+    const email =
+      data?.email ??
+      data?.user?.email ??
+      data?.session?.email ??
+      data?.session?.user?.email ??
+      data?.identity?.email ??
+      null;
+    return typeof email === "string" && email.length > 0 ? email : null;
+  } catch {
+    return null;
+  }
 }
