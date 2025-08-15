@@ -13,7 +13,6 @@ export default function User() {
   const [synced, setSynced] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Load session + profile
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -27,7 +26,14 @@ export default function User() {
         });
         if (s.ok) {
           const sess = await s.json();
-          if (alive) setEmail(sess?.email ?? null);
+          const em =
+            sess?.email ??
+            sess?.user?.email ??
+            sess?.session?.email ??
+            sess?.session?.user?.email ??
+            sess?.identity?.email ??
+            null;
+          if (alive) setEmail(typeof em === "string" ? em : null);
         } else if (alive) {
           setEmail(null);
         }
@@ -61,9 +67,8 @@ export default function User() {
       setSaving(true);
       setSynced(null);
       setError(null);
-      // Merge back into original profile so unknown keys are preserved
       const body = {
-        ...profile,
+        ...profile, // preserve unknown keys
         displayName,
         phone,
         notes,
@@ -95,6 +100,8 @@ export default function User() {
         credentials: "include",
       });
     } catch {}
+    // Ensure the login lightbox reappears on the next screen
+    localStorage.setItem("forceLogin", "1");
     window.location.href = "/";
   }
 
@@ -119,7 +126,9 @@ export default function User() {
             <div className="text-sm text-slate-600">
               <b>Status:</b>{" "}
               {email ? (
-                <span>Signed in as <span className="font-medium">{email}</span></span>
+                <span>
+                  Signed in as <span className="font-medium">{email}</span>
+                </span>
               ) : (
                 <span className="text-red-600">Not signed in</span>
               )}
