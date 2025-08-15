@@ -1,5 +1,6 @@
 // src/pages/User.tsx
 import { useEffect, useState } from "react"
+import SignOutButton from "../components/SignOutButton";
 
 type Profile = {
   email: string
