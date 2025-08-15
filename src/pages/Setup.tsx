@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useServerState } from "../lib/serverState";
+import { DEFAULT_SETTINGS, normalizeSettings } from "../lib/defaults";
+
 
 type Shed = {
   id: string;
