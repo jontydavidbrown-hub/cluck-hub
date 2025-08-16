@@ -15,7 +15,6 @@ function LoginLightboxInline() {
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
-  // Check current session on mount
   useEffect(() => {
     (async () => {
       try {
@@ -24,14 +23,22 @@ function LoginLightboxInline() {
       } catch {
         setUser(null);
       }
-      // No forced focus here — avoid stealing focus from user clicks
     })();
   }, [setUser]);
 
   const visible = !user?.email;
   if (!visible) return null;
 
+  const emailOk = /\S+@\S+\.\S+/.test(email);
+  const passOk = password.length >= 6;
+
+  function showError(msg: string, focus: "email" | "password" = "password") {
+    setError(msg);
+    requestAnimationFrame(() => (focus === "password" ? passwordRef : emailRef).current?.focus());
+  }
+
   async function doLogin() {
+    if (!emailOk || !passOk) return showError("Email and password (6+ chars) required");
     setBusy(true); setError(null);
     try {
       await login(email, password);
@@ -39,15 +46,15 @@ function LoginLightboxInline() {
       setUser(u?.email ? u : null);
       setEmail(""); setPassword("");
     } catch (e: any) {
-      setError(e?.message || "Invalid email or password");
-      // focus password for quick retry
-      requestAnimationFrame(() => passwordRef.current?.focus());
+      // 401 usually
+      showError(e?.message || "Invalid email or password");
     } finally {
       setBusy(false);
     }
   }
 
   async function doSignup() {
+    if (!emailOk || !passOk) return showError("Email and password (6+ chars) required");
     setBusy(true); setError(null);
     try {
       await signup(email, password);
@@ -55,35 +62,26 @@ function LoginLightboxInline() {
       setUser(u?.email ? u : null);
       setEmail(""); setPassword("");
     } catch (e: any) {
-      setError(e?.message || "Sign up failed");
+      const msg = String(e?.message || "");
+      if (/already exists/i.test(msg)) {
+        showError("Account already exists — please Log in instead.", "email");
+      } else {
+        showError(msg || "Sign up failed");
+      }
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      onClick={(e) => {
-        // keep modal open; consume backdrop clicks so underlying page doesn’t grab focus
-        e.stopPropagation();
-      }}
-    >
-      <div
-        className="card w-full max-w-md p-6 animate-fade-slide"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="card w-full max-w-md p-6 animate-fade-slide" onClick={(e) => e.stopPropagation()}>
         <h1 className="text-xl font-semibold mb-1">Log in</h1>
         <p className="text-sm text-slate-600 mb-4">Please sign in to continue.</p>
 
         <form
           className="space-y-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            doLogin();
-          }}
+          onSubmit={(e) => { e.preventDefault(); doLogin(); }}
         >
           <label className="block">
             <div className="text-xs font-medium mb-1 text-slate-700">Email</div>
@@ -117,15 +115,17 @@ function LoginLightboxInline() {
             <button
               type="button"
               className="rounded border px-4 py-2 disabled:opacity-60"
-              disabled={busy}
+              disabled={busy || !emailOk || !passOk}
               onClick={doSignup}
+              title={!emailOk || !passOk ? "Enter a valid email and a password with 6+ characters" : ""}
             >
               Sign up
             </button>
             <button
               type="submit"
               className="rounded bg-slate-900 text-white px-4 py-2 disabled:opacity-60"
-              disabled={busy}
+              disabled={busy || !emailOk || !passOk}
+              title={!emailOk || !passOk ? "Enter a valid email and a password with 6+ characters" : ""}
             >
               Log in
             </button>
@@ -135,6 +135,7 @@ function LoginLightboxInline() {
     </div>
   );
 }
+
 
 function HeaderFarmSelector() {
   const { farms = [], farmId, setFarmId, createFarm } = useFarm() as any;
