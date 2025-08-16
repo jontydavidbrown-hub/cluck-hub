@@ -90,4 +90,28 @@ export default function App() {
             <nav className="hidden md:flex items-center gap-1 text-sm">
               <NavItem to="/">Dashboard</NavItem>
               <NavItem to="/daily-log">Daily Log</NavItem>
-              <NavItem to="
+              <NavItem to="/weights">Weights</NavItem>
+              <NavItem to="/feed-silos">Feed Silos</NavItem>
+              <NavItem to="/water">Water</NavItem>
+              <NavItem to="/reminders">Reminders</NavItem>
+              <NavItem to="/setup">Setup</NavItem>
+              <NavItem to="/analytics">Analytics</NavItem>
+              <NavItem to="/members">Members</NavItem>
+              <NavItem to="/user">User</NavItem>
+            </nav>
+            <HeaderFarmSelector />
+          </div>
+        </div>
+      </header>
+
+      <main className="relative">
+        <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+          {/* Route transition wrapper (UI-only, no logic change) */}
+          <div key={routeKey} className="animate-fade-slide">
+            <Outlet />
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
