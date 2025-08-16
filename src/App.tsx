@@ -15,16 +15,19 @@ function LoginLightboxInline() {
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
+  // ✅ Run once on mount only (prevents infinite /auth?action=me loops)
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const u = await me();
-        setUser(u?.email ? u : null);
+        if (!cancelled) setUser(u?.email ? u : null);
       } catch {
-        setUser(null);
+        if (!cancelled) setUser(null);
       }
     })();
-  }, [setUser]);
+    return () => { cancelled = true; };
+  }, []); // ← IMPORTANT: empty deps
 
   const visible = !user?.email;
   if (!visible) return null;
@@ -46,7 +49,6 @@ function LoginLightboxInline() {
       setUser(u?.email ? u : null);
       setEmail(""); setPassword("");
     } catch (e: any) {
-      // 401 usually
       showError(e?.message || "Invalid email or password");
     } finally {
       setBusy(false);
@@ -63,11 +65,8 @@ function LoginLightboxInline() {
       setEmail(""); setPassword("");
     } catch (e: any) {
       const msg = String(e?.message || "");
-      if (/already exists/i.test(msg)) {
-        showError("Account already exists — please Log in instead.", "email");
-      } else {
-        showError(msg || "Sign up failed");
-      }
+      if (/already exists/i.test(msg)) showError("Account already exists — please Log in instead.", "email");
+      else showError(msg || "Sign up failed");
     } finally {
       setBusy(false);
     }
@@ -79,10 +78,7 @@ function LoginLightboxInline() {
         <h1 className="text-xl font-semibold mb-1">Log in</h1>
         <p className="text-sm text-slate-600 mb-4">Please sign in to continue.</p>
 
-        <form
-          className="space-y-3"
-          onSubmit={(e) => { e.preventDefault(); doLogin(); }}
-        >
+        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); doLogin(); }}>
           <label className="block">
             <div className="text-xs font-medium mb-1 text-slate-700">Email</div>
             <input
@@ -136,12 +132,9 @@ function LoginLightboxInline() {
   );
 }
 
-
 function HeaderFarmSelector() {
   const { farms = [], farmId, setFarmId, createFarm } = useFarm() as any;
-
   if (!Array.isArray(farms) || farms.length === 0) return null;
-
   return (
     <div className="flex items-center gap-2">
       <select
