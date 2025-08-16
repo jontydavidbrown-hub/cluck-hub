@@ -5,24 +5,25 @@ import { me, logout } from "../lib/session";
 export default function User() {
   const { state: user, setState: setUser } = useServerState<{ email: string } | null>("user", null);
 
-  // On mount, sync session -> user state
+  // ✅ Run once on mount only (prevents loops)
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const u = await me();
-        setUser(u?.email ? u : null);
+        if (!cancelled) setUser(u?.email ? u : null);
       } catch {
-        setUser(null);
+        if (!cancelled) setUser(null);
       }
     })();
-  }, [setUser]);
+    return () => { cancelled = true; };
+  }, []); // ← IMPORTANT
 
   async function onSignOut() {
     try {
       await logout();
     } finally {
-      // force the login lightbox to show again
-      setUser(null);
+      setUser(null); // force login modal to reappear
     }
   }
 
