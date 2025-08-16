@@ -89,9 +89,9 @@ export default function App() {
             <Brand />
             <nav className="hidden md:flex items-center gap-1 text-sm">
               <NavItem to="/">Dashboard</NavItem>
-              <NavItem to="/daily-log">Daily Log</NavItem>
+              <NavItem to="/daily">Daily Log</NavItem>
               <NavItem to="/weights">Weights</NavItem>
-              <NavItem to="/feed-silos">Feed Silos</NavItem>
+              <NavItem to="/feed">Feed Silos</NavItem>
               <NavItem to="/water">Water</NavItem>
               <NavItem to="/reminders">Reminders</NavItem>
               <NavItem to="/setup">Setup</NavItem>
