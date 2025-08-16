@@ -12,11 +12,16 @@ export default class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.error) {
       return (
-        <div className="p-6">
-          <h1 className="text-xl font-semibold mb-2">Unexpected Application Error</h1>
-          <pre className="p-3 rounded bg-slate-100 text-slate-800 overflow-auto">
-            {String(this.state.error?.message || this.state.error)}
-          </pre>
+        <div className="max-w-2xl mx-auto p-6">
+          <div className="card p-6">
+            <h1 className="text-xl font-semibold mb-3">Something went wrong</h1>
+            <p className="text-sm text-slate-600 mb-3">
+              The app hit an unexpected error. The technical message is below to help with debugging.
+            </p>
+            <pre className="p-3 rounded-xl bg-slate-900 text-slate-100 overflow-auto text-xs">
+{String(this.state.error?.message || this.state.error)}
+            </pre>
+          </div>
         </div>
       );
     }
