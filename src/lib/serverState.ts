@@ -7,10 +7,13 @@ const ARRAY_KEYS = new Set([
   "reminders", "members", "notes", "batches", "feed"
 ]);
 
+type Member = { email: string; role: "owner"|"manager"|"worker"|"viewer" };
+type Farm = { id: string; name: string; members?: Member[] };
+
 type AppState = {
   user?: { email: string } | null;
   farmId?: string | null;
-  farms?: { id: string; name: string; members?: { email: string; role: "owner"|"manager"|"worker"|"viewer" }[] }[];
+  farms?: Farm[];
   settings: AppSettings;
   // dynamic slices (arrays above + any other ad-hoc slices)
   [key: string]: any;
@@ -81,13 +84,43 @@ export function setSettings(patch: Partial<AppSettings>) {
   persist(); emit();
 }
 
-export function useServerState() {
+// Overload declarations for better TS DX
+export function useServerState(): AppState;
+// When called with a key + initial, return a slice helper that is ALSO iterable.
+export function useServerState<T = any>(key: string, initial: T):
+  ({ state: T; setState: (next: T | ((prev: T) => T)) => void; loading: boolean; synced: boolean } & Iterable<any>);
+
+export function useServerState<T = any>(key?: string, initial?: T): any {
   const subscribe = (cb: () => void) => { subscribers.add(cb); return () => subscribers.delete(cb); };
   const snapshot = () => _state;
   const state = useSyncExternalStore(subscribe, snapshot, snapshot);
-  // memo to avoid re-renders when consumer selects
-  return useMemo(() => state, [state]);
+  const memo = useMemo(() => state, [state]);
+
+  if (typeof key === "string") {
+    // Slice mode
+    const current = (memo as any)[key] ?? initial as T;
+    const setter = (next: T | ((prev: T) => T)) => {
+      const prevVal = (getState() as any)[key] ?? initial;
+      const value = typeof next === "function" ? (next as any)(prevVal) : next;
+      setState({ [key]: value } as any);
+    };
+
+    // Return an object that supports both object and array destructuring
+    const helper: any = {
+      state: current as T,
+      setState: setter,
+      loading: false,
+      synced: true,
+    };
+    helper[Symbol.iterator] = function* () {
+      yield current as T;
+      yield setter;
+    };
+    return helper;
+  }
+
+  // Full-state mode
+  return memo;
 }
 
-/** Convenience getter */
 export const getSettings = () => normalizeSettings(getState().settings);
