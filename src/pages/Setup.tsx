@@ -4,10 +4,9 @@ import { useCloudSlice } from "../lib/cloudSlice";
 type Settings = Record<string, any>;
 
 export default function Setup() {
-  // Uses the same "settings" slice you already persist; nothing else changes.
   const [settings, setSettings] = useCloudSlice<Settings>("settings", {});
 
-  // Helper to update a numeric field safely while preserving other keys.
+  // helper: update numeric field while preserving others
   function setNum<K extends string>(key: K) {
     return (e: React.ChangeEvent<HTMLInputElement>) => {
       const raw = e.target.value;
@@ -17,7 +16,6 @@ export default function Setup() {
     };
   }
 
-  // Display a sorted list of other numeric keys so existing numeric settings remain editable.
   const otherNumericKeys = useMemo(() => {
     return Object.keys(settings || {})
       .filter((k) => k !== "batchLengthDays")
@@ -29,7 +27,7 @@ export default function Setup() {
     <div className="p-4 space-y-6">
       <h1 className="text-2xl font-semibold">Setup</h1>
 
-      {/* Batch / production cycle length (days) */}
+      {/* Batch settings */}
       <div className="card p-4">
         <div className="font-medium mb-3">Batch settings</div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -40,7 +38,7 @@ export default function Setup() {
               min={1}
               placeholder="0"
               className="w-full border rounded px-2 py-1 placeholder-transparent"
-              value={Number(settings.batchLengthDays ?? 0)}
+              value={settings.batchLengthDays ?? ""}
               onChange={(e) => {
                 const n = Math.max(1, Number(e.target.value || 1));
                 setSettings((prev: Settings) => ({ ...prev, batchLengthDays: n }));
@@ -53,21 +51,19 @@ export default function Setup() {
         </p>
       </div>
 
-      {/* Auto-render any other numeric settings you already store so behavior stays the same */}
+      {/* Any other numeric settings already present */}
       {otherNumericKeys.length > 0 && (
         <div className="card p-4">
           <div className="font-medium mb-3">Other numeric settings</div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {otherNumericKeys.map((key) => (
               <div key={key}>
-                <label className="block text-sm mb-1">
-                  {labelize(key)}
-                </label>
+                <label className="block text-sm mb-1">{labelize(key)}</label>
                 <input
                   type="number"
                   placeholder="0"
                   className="w-full border rounded px-2 py-1 placeholder-transparent"
-                  value={Number(settings[key] ?? 0)}
+                  value={settings[key] ?? ""}
                   onChange={setNum(key)}
                 />
               </div>
@@ -82,7 +78,6 @@ export default function Setup() {
   );
 }
 
-/** turn "chlorineTarget" -> "Chlorine target" */
 function labelize(key: string) {
   return key
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
