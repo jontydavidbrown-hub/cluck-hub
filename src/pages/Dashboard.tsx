@@ -31,69 +31,93 @@ function daysBetweenUTC(yyyyMmDdA?: string, yyyyMmDdB?: string) {
   return Math.floor(diffMs / (1000 * 60 * 60 * 24));
 }
 
-// Heuristic: pick whichever path your nav actually links to
+/** Robustly resolve the Daily Log route by scanning rendered anchors. */
 function resolveDailyLogPath(): string {
-  const candidates = ["/daily-log", "/daily-logs"];
-  if (typeof document !== "undefined") {
-    for (const p of candidates) {
-      if (document.querySelector(`a[href="${p}"]`)) return p;
-    }
+  if (typeof document === "undefined") return "/daily-log";
+  const anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"));
+  const candidates = [
+    "/daily-log",
+    "/daily-logs",
+    "/logs/daily",
+    "/daily",
+    "/log/daily",
+    "/morts",
+    "/mortality",
+    "/mortality-log",
+    "/logs",
+  ];
+
+  // Exact match wins
+  for (const c of candidates) {
+    if (anchors.some(a => (a.getAttribute("href") || "") === c)) return c;
   }
-  return "/daily-log"; // sensible default
+
+  // Score-based fuzzy match on href + link text
+  let bestHref = "/daily-log";
+  let bestScore = -Infinity;
+  for (const a of anchors) {
+    const href = (a.getAttribute("href") || "").toLowerCase();
+    const text = (a.textContent || "").toLowerCase();
+    let score = 0;
+    if (/^\/.*daily-?logs?/.test(href)) score += 60;
+    if (/mort/.test(href)) score += 40;
+    if (/daily/.test(href)) score += 20;
+    if (/log/.test(href)) score += 20;
+    if (/mort/.test(text)) score += 10;
+    if (/daily/.test(text)) score += 10;
+    if (/log/.test(text)) score += 10;
+    if (score > bestScore) { bestScore = score; bestHref = href || bestHref; }
+  }
+  return bestHref || "/daily-log";
 }
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const DAILY_LOG_PATH = resolveDailyLogPath();
 
-  // Read persisted slices
   const [sheds] = useCloudSlice<Shed[]>("sheds", []);
   const [dailyLog] = useCloudSlice<DailyLogRow[]>("dailyLog", []);
   const [settings] = useCloudSlice<Settings>("settings", {});
 
   const today = new Date().toISOString().slice(0, 10);
-  const batchLen = Math.max(1, Number(settings.batchLengthDays ?? 42)); // default if unset
+  const batchLen = Math.max(1, Number(settings.batchLengthDays ?? 42));
 
-  // Compute per-shed stats (morts + progress)
   const tiles = useMemo(() => {
     const rows = dailyLog || [];
     const byShedMorts = new Map<string, number>();
     for (const r of rows) {
       const key = (r.shed || "").trim();
       if (!key) continue;
-      const add = Number(r.mortalities) || 0;
-      byShedMorts.set(key, (byShedMorts.get(key) || 0) + add);
+      byShedMorts.set(key, (byShedMorts.get(key) || 0) + (Number(r.mortalities) || 0));
     }
 
-    const list = (sheds || []).map((s) => {
-      const shedName = s.name || "";
-      const mortsTotal = byShedMorts.get(shedName) || 0;
-
-      let progressPct = 0;
-      if (s.placementDate) {
-        const days = daysBetweenUTC(s.placementDate, today);
-        progressPct = Math.min(100, Math.max(0, Math.round((days / batchLen) * 100)));
-      }
-
-      const placed = Number(s.birdsPlaced ?? s.placementBirds) || undefined;
-
-      return {
-        id: s.id,
-        name: shedName,
-        placementDate: s.placementDate || "",
-        birdsPlaced: placed,
-        progressPct,
-        mortsTotal,
-      };
-    });
-
-    return list.sort((a, b) => a.name.localeCompare(b.name));
+    return (sheds || [])
+      .map((s) => {
+        const shedName = s.name || "";
+        const mortsTotal = byShedMorts.get(shedName) || 0;
+        let progressPct = 0;
+        if (s.placementDate) {
+          const days = daysBetweenUTC(s.placementDate, today);
+          progressPct = Math.min(100, Math.max(0, Math.round((days / batchLen) * 100)));
+        }
+        const placed = Number(s.birdsPlaced ?? s.placementBirds) || undefined;
+        return {
+          id: s.id,
+          name: shedName,
+          placementDate: s.placementDate || "",
+          birdsPlaced: placed,
+          progressPct,
+          mortsTotal,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [sheds, dailyLog, batchLen, today]);
 
   function goAddWeights(name: string) {
     const q = new URLSearchParams({ shed: name });
     navigate(`/weights?${q.toString()}`);
   }
+
   function goAddMorts(name: string) {
     const q = new URLSearchParams({ shed: name, focus: "mortalities" });
     navigate(`${DAILY_LOG_PATH}?${q.toString()}`);
@@ -118,7 +142,6 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Progress bar */}
               <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
                 <div
                   className="h-2 bg-slate-900 transition-[width] duration-500"
@@ -130,7 +153,6 @@ export default function Dashboard() {
                 Batch progress: <span className="font-medium">{t.progressPct}%</span>
               </div>
 
-              {/* Birds placed + morts */}
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="rounded border p-2">
                   <div className="text-xs text-slate-500">Birds placed</div>
@@ -142,7 +164,6 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Actions */}
               <div className="mt-1 flex gap-2">
                 <button
                   className="px-3 py-1 rounded border hover:bg-slate-50"
