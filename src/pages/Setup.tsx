@@ -1,113 +1,69 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+// src/pages/Setup.tsx
+import { useMemo, useState } from "react";
 import { useCloudSlice } from "../lib/cloudSlice";
 
 type Settings = {
-  batchLengthDays?: number;
+  batchLengthDays?: number; // e.g., 42
 };
 
 type Shed = {
   id: string;
   name: string;
-  placementDate?: string;   // YYYY-MM-DD
-  placementBirds?: number;  // mirrored to birdsPlaced
-  birdsPlaced?: number;
+  placementDate?: string;       // YYYY-MM-DD
+  placementBirds?: number;      // legacy support
+  birdsPlaced?: number;         // current field
 };
 
-function newId() {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
+type FeedQuotas = {
+  starter: number;   // 24t loads
+  grower: number;    // 24t loads
+  finisher: number;  // 24t loads
+  booster: number;   // 24t loads (0 = unlimited/as needed)
+};
+
+// Helpers
+const clampNonNeg = (v: any) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
+const uuid = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : String(Math.random()).slice(2));
 
 export default function Setup() {
-  // Persisted slices (keys unchanged)
-  const [settings, setSettings] = useCloudSlice<Settings>("settings", {});
+  // Cloud-synced slices (scoped by farm via useCloudSlice implementation)
+  const [settings, setSettings] = useCloudSlice<Settings>("settings", { batchLengthDays: 42 });
   const [sheds, setSheds] = useCloudSlice<Shed[]>("sheds", []);
+  const [feedQuotas, setFeedQuotas] = useCloudSlice<FeedQuotas>("feedQuotas", {
+    starter: 4,
+    grower: 8,
+    finisher: 12,
+    booster: 0,
+  });
 
-  // Batch length uses a local draft so you can clear/retype easily
-  const [batchDraft, setBatchDraft] = useState<string>("");
+  const [justSaved, setJustSaved] = useState<null | string>(null);
 
-  // Save indicators
-  const [justSaved, setJustSaved] = useState(false);
-  const autosaveReady = useRef(false); // skip autosave flash on first load
-  const [focusId, setFocusId] = useState<string | null>(null);
-
-  // Keep the draft in sync with persisted settings
-  useEffect(() => {
-    const v = settings.batchLengthDays;
-    setBatchDraft(v == null ? "" : String(v));
-  }, [settings.batchLengthDays]);
-
-  function commitBatchLength() {
-    const raw = batchDraft.trim();
-    if (raw === "") {
-      setSettings((prev) => ({ ...prev, batchLengthDays: 1 }));
-      setBatchDraft("1");
-      return;
-    }
-    const n = Math.max(1, Number(raw));
-    setSettings((prev) => ({ ...prev, batchLengthDays: n }));
-    setBatchDraft(String(n));
-  }
-
-  // Normalize shed birds so both names are present
-  function normalizeShedBirds(s: Shed): Shed {
-    const v =
-      s.placementBirds != null ? Number(s.placementBirds) :
-      s.birdsPlaced != null ? Number(s.birdsPlaced) :
-      undefined;
-    return { ...s, placementBirds: v, birdsPlaced: v };
-  }
-
-  async function handleSave() {
-    // Ensure any draft is committed
-    commitBatchLength();
-
-    // Normalize & force push sheds
-    setSheds((prev) => {
-      const list = (prev || []).map(normalizeShedBirds);
-      return [...list]; // new array -> guarantees push
-    });
-
-    // Nudge settings too (in case unchanged object)
-    setSettings((prev) => ({ ...prev }));
-
-    setJustSaved(true);
-    window.setTimeout(() => setJustSaved(false), 1500);
-  }
-
-  // 🔄 Autosave feedback when sheds change (edits/adds/removes)
-  useEffect(() => {
-    if (!autosaveReady.current) {
-      autosaveReady.current = true;
-      return;
-    }
-    // cloudSlice already pushes on state change; we show a quick "Saved"
-    setJustSaved(true);
-    const t = window.setTimeout(() => setJustSaved(false), 900);
-    return () => window.clearTimeout(t);
-  }, [sheds]);
-
-  // Sorted sheds for stable UI
   const shedsSorted = useMemo(
-    () => [...(sheds || [])].sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+    () => [...(sheds || [])].sort((a, b) => (a?.name || "").localeCompare(b?.name || "")),
     [sheds]
   );
 
-  function addBlankShedRow() {
-    const id = newId();
-    const shed: Shed = { id, name: "", placementDate: "", placementBirds: undefined, birdsPlaced: undefined };
-    setSheds((prev) => [...(prev || []), shed]);
-    setFocusId(id);
+  function addShed() {
+    const next: Shed = { id: uuid(), name: "", placementDate: "", birdsPlaced: undefined };
+    setSheds([...(sheds || []), next]);
   }
 
-  function updateShed(id: string, patch: Partial<Shed>) {
-    setSheds((prev) =>
-      prev.map((s) => (s.id === id ? normalizeShedBirds({ ...s, ...patch }) : s))
-    );
+  function updateShed<K extends keyof Shed>(id: string, key: K, value: Shed[K]) {
+    setSheds((prev) => (prev || []).map((s) => (s.id === id ? { ...s, [key]: value } : s)));
   }
 
   function removeShed(id: string) {
     if (!confirm("Remove this shed?")) return;
-    setSheds((prev) => prev.filter((s) => s.id !== id));
+    setSheds((prev) => (prev || []).filter((s) => s.id !== id));
+  }
+
+  function saveNow() {
+    // Force a push by setting to shallow-copied values
+    setSheds([...(sheds || [])]);
+    setSettings({ ...(settings || {}) });
+    setFeedQuotas({ ...(feedQuotas || { starter: 0, grower: 0, finisher: 0, booster: 0 }) });
+    setJustSaved("Saved ✓");
+    window.setTimeout(() => setJustSaved(null), 1500);
   }
 
   return (
@@ -115,113 +71,196 @@ export default function Setup() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Setup</h1>
         <div className="flex items-center gap-2">
-          {justSaved && <span className="text-sm text-green-600">Saved ✓</span>}
-          <button className="rounded bg-slate-900 text-white px-4 py-2" onClick={handleSave}>
+          {justSaved && <span className="text-sm text-emerald-600">{justSaved}</span>}
+          <button className="rounded bg-slate-900 text-white px-4 py-2" onClick={saveNow}>
             Save
           </button>
         </div>
       </div>
 
-      {/* Batch settings */}
-      <div className="card p-4 space-y-4">
-        <div className="font-medium">Batch settings</div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm mb-1">Batch length (days)</label>
+      {/* Batch Settings */}
+      <div className="p-4 border rounded-2xl bg-white">
+        <div className="font-medium mb-3">Batch Settings</div>
+        <div className="grid md:grid-cols-3 gap-3">
+          <label className="block">
+            <div className="text-sm mb-1">Batch Length (days)</div>
             <input
               type="number"
               min={1}
-              placeholder="0"
-              className="w-full border rounded px-2 py-1 placeholder-transparent"
-              value={batchDraft}
-              onChange={(e) => setBatchDraft(e.target.value)}
-              onBlur={commitBatchLength}
-              onKeyDown={(e) => { if (e.key === "Enter") commitBatchLength(); }}
+              className="w-full border rounded px-3 py-2 placeholder-transparent"
+              placeholder="e.g. 42"
+              value={
+                typeof settings.batchLengthDays === "number" && settings.batchLengthDays > 0
+                  ? settings.batchLengthDays
+                  : ""
+              }
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  batchLengthDays: Math.max(1, Number(e.target.value || 1)),
+                })
+              }
             />
-            <p className="mt-1 text-xs text-slate-500">
-              Clear to edit; commits a minimum of 1 on blur/enter.
-            </p>
-          </div>
+          </label>
         </div>
       </div>
 
-      {/* Sheds configuration */}
-      <div className="card p-4 space-y-4">
-        <div className="flex items-center justify-between">
+      {/* Sheds */}
+      <div className="p-4 border rounded-2xl bg-white">
+        <div className="flex items-center justify-between mb-3">
           <div className="font-medium">Sheds</div>
-          <button
-            className="rounded bg-slate-900 text-white px-4 py-2"
-            onClick={addBlankShedRow}
-          >
+          <button className="rounded border px-3 py-1 hover:bg-slate-50" onClick={addShed}>
             Add Shed
           </button>
         </div>
 
-        {/* List/edit sheds */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left border-b">
-                <th className="py-2 pr-2">Shed</th>
-                <th className="py-2 pr-2">Placement date</th>
-                <th className="py-2 pr-2">Placement birds</th>
-                <th className="py-2 pr-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shedsSorted.map((s) => (
-                <tr key={s.id} className="border-b">
-                  <td className="py-2 pr-2">
-                    <input
-                      className="border rounded px-2 py-1"
-                      value={s.name}
-                      autoFocus={s.id === focusId}
-                      onChange={(e) => updateShed(s.id, { name: e.target.value })}
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="date"
-                      className="border rounded px-2 py-1"
-                      value={s.placementDate || ""}
-                      onChange={(e) => updateShed(s.id, { placementDate: e.target.value })}
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="number"
-                      min={0}
-                      placeholder="0"
-                      className="border rounded px-2 py-1 placeholder-transparent"
-                      value={s.placementBirds ?? s.birdsPlaced ?? ""}
-                      onChange={(e) => {
-                        const raw = e.target.value;
-                        const v = raw === "" ? undefined : Number(raw);
-                        updateShed(s.id, { placementBirds: v, birdsPlaced: v });
-                      }}
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <button
-                      className="px-2 py-1 border rounded text-red-600"
-                      onClick={() => removeShed(s.id)}
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {shedsSorted.length === 0 && (
-                <tr>
-                  <td className="py-6 text-gray-500" colSpan={4}>No sheds yet.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        {shedsSorted.length === 0 ? (
+          <div className="text-sm text-slate-600">No sheds yet. Click “Add Shed”.</div>
+        ) : (
+          <div className="space-y-3">
+            {shedsSorted.map((s) => (
+              <div key={s.id} className="grid md:grid-cols-12 gap-3 items-end p-3 rounded-xl border">
+                {/* Shed name */}
+                <label className="md:col-span-4 block">
+                  <div className="text-sm mb-1">Shed</div>
+                  <input
+                    type="text"
+                    className="w-full border rounded px-3 py-2 placeholder-transparent"
+                    placeholder="e.g., Shed 1"
+                    value={s.name ?? ""}
+                    onChange={(e) => updateShed(s.id, "name", e.target.value)}
+                  />
+                </label>
+
+                {/* Placement date */}
+                <label className="md:col-span-4 block">
+                  <div className="text-sm mb-1">Placement Date</div>
+                  <input
+                    type="date"
+                    className="w-full border rounded px-3 py-2 placeholder-transparent"
+                    value={s.placementDate ?? ""}
+                    onChange={(e) => updateShed(s.id, "placementDate", e.target.value)}
+                  />
+                </label>
+
+                {/* Placement birds */}
+                <label className="md:col-span-3 block">
+                  <div className="text-sm mb-1">Placement Birds</div>
+                  <input
+                    type="number"
+                    min={0}
+                    className="w-full border rounded px-3 py-2 placeholder-transparent"
+                    placeholder="0"
+                    value={
+                      s.birdsPlaced !== undefined
+                        ? s.birdsPlaced
+                        : s.placementBirds !== undefined
+                        ? s.placementBirds
+                        : ""
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      updateShed(
+                        s.id,
+                        "birdsPlaced",
+                        v === "" ? undefined : Math.max(0, Number(v))
+                      );
+                    }}
+                  />
+                </label>
+
+                {/* Remove */}
+                <div className="md:col-span-1">
+                  <button
+                    className="w-full rounded border px-3 py-2 text-red-600 hover:bg-red-50"
+                    onClick={() => removeShed(s.id)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Feed Quotas (24t loads) */}
+      <div className="p-4 border rounded-2xl bg-white">
+        <div className="font-medium mb-3">Feed Quotas (24t loads)</div>
+
+        <div className="grid md:grid-cols-4 gap-3">
+          <label className="block">
+            <div className="text-sm mb-1">Starter</div>
+            <input
+              type="number"
+              min={0}
+              className="w-full border rounded px-3 py-2 placeholder-transparent"
+              placeholder="0"
+              value={Number.isFinite(feedQuotas.starter) ? feedQuotas.starter : ""}
+              onChange={(e) =>
+                setFeedQuotas({
+                  ...feedQuotas,
+                  starter: clampNonNeg(e.target.value || 0),
+                })
+              }
+            />
+          </label>
+
+          <label className="block">
+            <div className="text-sm mb-1">Grower</div>
+            <input
+              type="number"
+              min={0}
+              className="w-full border rounded px-3 py-2 placeholder-transparent"
+              placeholder="0"
+              value={Number.isFinite(feedQuotas.grower) ? feedQuotas.grower : ""}
+              onChange={(e) =>
+                setFeedQuotas({
+                  ...feedQuotas,
+                  grower: clampNonNeg(e.target.value || 0),
+                })
+              }
+            />
+          </label>
+
+          <label className="block">
+            <div className="text-sm mb-1">Finisher</div>
+            <input
+              type="number"
+              min={0}
+              className="w-full border rounded px-3 py-2 placeholder-transparent"
+              placeholder="0"
+              value={Number.isFinite(feedQuotas.finisher) ? feedQuotas.finisher : ""}
+              onChange={(e) =>
+                setFeedQuotas({
+                  ...feedQuotas,
+                  finisher: clampNonNeg(e.target.value || 0),
+                })
+              }
+            />
+          </label>
+
+          <label className="block">
+            <div className="text-sm mb-1">Booster</div>
+            <input
+              type="number"
+              min={0}
+              className="w-full border rounded px-3 py-2 placeholder-transparent"
+              placeholder="0"
+              value={Number.isFinite(feedQuotas.booster) ? feedQuotas.booster : ""}
+              onChange={(e) =>
+                setFeedQuotas({
+                  ...feedQuotas,
+                  booster: clampNonNeg(e.target.value || 0), // 0 = unlimited
+                })
+              }
+            />
+          </label>
         </div>
 
-        <p className="text-xs text-slate-600">
-          Numbers use transparent placeholders so you can type over them. We sync both “placementBirds” and “birdsPlaced” for dashboard compatibility.
+        <p className="mt-2 text-xs text-slate-500">
+          Enter the planned number of <strong>24t loads</strong> for each feed type. Set{" "}
+          <strong>Booster</strong> to <strong>0</strong> if it’s unlimited/as needed.
         </p>
       </div>
     </div>
