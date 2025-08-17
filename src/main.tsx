@@ -1,35 +1,32 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
+
 import App from "./App";
+
+// Pages
 import Dashboard from "./pages/Dashboard";
 import DailyLog from "./pages/DailyLog";
 import Weights from "./pages/Weights";
-import FeedSilos from "./pages/FeedSilos";
+import Feed from "./pages/Feed";
 import Water from "./pages/Water";
 import Reminders from "./pages/Reminders";
 import Setup from "./pages/Setup";
-import User from "./pages/User";
 import Analytics from "./pages/Analytics";
 import Members from "./pages/Members";
-import { FarmProvider } from "./lib/FarmContext";
-import ErrorBoundary from "./ErrorBoundary";
-import "./index.css";
+import User from "./pages/User";
+
+import ErrorBoundary from "./lib/ErrorBoundary";
 
 const router = createBrowserRouter([
   {
     path: "/",
     element: <App />,
-    errorElement: (
-      <ErrorBoundary>
-        <div className="p-4">Something went wrong.</div>
-      </ErrorBoundary>
-    ),
     children: [
       { index: true, element: <Dashboard /> },
       { path: "daily", element: <DailyLog /> },
       { path: "weights", element: <Weights /> },
-      { path: "feed", element: <FeedSilos /> },
+      { path: "feed", element: <Feed /> },
       { path: "water", element: <Water /> },
       { path: "reminders", element: <Reminders /> },
       { path: "setup", element: <Setup /> },
@@ -42,10 +39,8 @@ const router = createBrowserRouter([
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <FarmProvider>
-      <ErrorBoundary>
-        <RouterProvider router={router} />
-      </ErrorBoundary>
-    </FarmProvider>
+    <ErrorBoundary>
+      <RouterProvider router={router} fallbackElement={<div style={{padding:16}}>Loading…</div>} />
+    </ErrorBoundary>
   </React.StrictMode>
 );
