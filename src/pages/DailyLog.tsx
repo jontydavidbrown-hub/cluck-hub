@@ -1,14 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useCloudSlice } from "../lib/cloudSlice";
 import { downloadCsv } from "../lib/csv";
 import { pdfDailyLog } from "../lib/pdfLogs";
+import { useLocation } from "react-router-dom";
 
 type Row = {
   id: string;
   date: string;            // YYYY-MM-DD
   shed?: string;
-  mortalities?: number;    // optional so placeholder can show
-  culls?: number;          // optional so placeholder can show
+  mortalities?: number;    // optional so we can show empty input
+  culls?: number;          // optional so we can show empty input
   notes?: string;
 };
 
@@ -17,7 +18,6 @@ function newId() {
 }
 function emptyRow(): Row {
   const today = new Date().toISOString().slice(0, 10);
-  // make numeric fields undefined so inputs can show placeholder ""
   return { id: newId(), date: today, shed: "", mortalities: undefined, culls: undefined, notes: "" };
 }
 
@@ -26,6 +26,21 @@ export default function DailyLog() {
   const [draft, setDraft] = useState<Row>(emptyRow());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [edit, setEdit] = useState<Row | null>(null);
+
+  // --- NEW: preselect shed from query string + focus morts if requested
+  const location = useLocation();
+  const mortsRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const preset = params.get("shed") || "";
+    const focus = params.get("focus") || "";
+    if (preset) setDraft((d) => ({ ...d, shed: preset }));
+    if (focus === "mortalities") {
+      // slight delay ensures the element is mounted
+      const t = window.setTimeout(() => mortsRef.current?.focus(), 0);
+      return () => window.clearTimeout(t);
+    }
+  }, [location.search]);
 
   const sorted = useMemo(
     () => [...rows].sort((a, b) => a.date.localeCompare(b.date)),
@@ -114,6 +129,7 @@ export default function DailyLog() {
           <div>
             <label className="block text-sm mb-1">Mortalities</label>
             <input
+              ref={mortsRef}
               type="number" min={0}
               className="w-full border rounded px-2 py-1 placeholder-transparent"
               placeholder="0"
