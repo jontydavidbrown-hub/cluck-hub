@@ -4,7 +4,7 @@ import { useFarm } from "./lib/FarmContext";
 import { useServerState } from "./lib/serverState";
 import { login, signup, me } from "./lib/session";
 
-/** Inline login lightbox (modal) — uses serverState for the `user` slice */
+/** Inline login lightbox (modal) — keep `user` on serverState */
 function LoginLightboxInline() {
   const { state: user, setState: setUser } =
     useServerState<{ email: string } | null>("user", null);
@@ -13,25 +13,37 @@ function LoginLightboxInline() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [checked, setChecked] = useState(false); // <- ensures we decide visibility after /me
+
+  // We gate showing the modal behind `checked` so we don't flash it while /me is running
+  const [checked, setChecked] = useState(false);
+
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
-  // Run once on mount: check current session and then mark as checked
   useEffect(() => {
     let cancelled = false;
+    // Failsafe: if /me is slow/broken, still show the modal after 1.5s
+    const failsafe = setTimeout(() => {
+      if (!cancelled) setChecked(true);
+    }, 1500);
+
     (async () => {
       try {
-        const u = await me();
+        const u = await me(); // GET /.netlify/functions/auth?action=me (credentials: include)
         if (!cancelled) setUser(u?.email ? u : null);
       } catch {
         if (!cancelled) setUser(null);
       } finally {
         if (!cancelled) setChecked(true);
+        clearTimeout(failsafe);
       }
     })();
-    return () => { cancelled = true; };
-  }, []); // do not depend on setUser to avoid loops
+
+    return () => {
+      cancelled = true;
+      clearTimeout(failsafe);
+    };
+  }, []); // IMPORTANT: empty deps
 
   const emailOk = /\S+@\S+\.\S+/.test(email);
   const passOk = password.length >= 6;
@@ -51,9 +63,7 @@ function LoginLightboxInline() {
       setEmail(""); setPassword("");
     } catch (e: any) {
       showError(e?.message || "Invalid email or password");
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   }
 
   async function doSignup() {
@@ -68,12 +78,10 @@ function LoginLightboxInline() {
       const msg = String(e?.message || "");
       if (/already exists/i.test(msg)) showError("Account already exists — please Log in instead.", "email");
       else showError(msg || "Sign up failed");
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   }
 
-  // Only show the modal once we've checked the session and the user is not signed in
+  // Show only after we've checked, and only if not signed in
   const visible = checked && !user?.email;
   if (!visible) return null;
 
@@ -113,21 +121,13 @@ function LoginLightboxInline() {
           {error && <div className="text-sm text-red-600">{error}</div>}
 
           <div className="flex items-center justify-end gap-2 pt-2">
-            <button
-              type="button"
-              className="rounded border px-4 py-2 disabled:opacity-60"
+            <button type="button" className="rounded border px-4 py-2 disabled:opacity-60"
               disabled={busy || !emailOk || !passOk}
-              onClick={doSignup}
-              title={!emailOk || !passOk ? "Enter a valid email and a password with 6+ characters" : ""}
-            >
+              onClick={doSignup}>
               Sign up
             </button>
-            <button
-              type="submit"
-              className="rounded bg-slate-900 text-white px-4 py-2 disabled:opacity-60"
-              disabled={busy || !emailOk || !passOk}
-              title={!emailOk || !passOk ? "Enter a valid email and a password with 6+ characters" : ""}
-            >
+            <button type="submit" className="rounded bg-slate-900 text-white px-4 py-2 disabled:opacity-60"
+              disabled={busy || !emailOk || !passOk}>
               Log in
             </button>
           </div>
@@ -148,18 +148,12 @@ function HeaderFarmSelector() {
         onChange={(e) => setFarmId(e.target.value)}
       >
         {farms.map((f: any) => (
-          <option key={f.id} value={f.id}>
-            {f.name || "Farm " + f.id.slice(0, 4)}
-          </option>
+          <option key={f.id} value={f.id}>{f.name || "Farm " + f.id.slice(0, 4)}</option>
         ))}
       </select>
       <button
         className="px-3 py-1.5 rounded-lg border border-gray-200 hover:border-gray-300 bg-white/80 hover:bg-white shadow-sm transition"
-        onClick={() => {
-          const name = prompt("New farm name?") || undefined;
-          createFarm?.(name);
-        }}
-      >
+        onClick={() => createFarm?.(prompt("New farm name?") || undefined)}>
         + New farm
       </button>
     </div>
@@ -180,29 +174,21 @@ function NavItem({ to, children }: { to: string; children: any }) {
     <NavLink
       to={to}
       className={({ isActive }) =>
-        [
-          "relative px-3 py-2 rounded-xl transition-colors",
-          "hover:bg-slate-900/5",
-          isActive ? "text-slate-900" : "text-slate-600",
-        ].join(" ")
+        ["relative px-3 py-2 rounded-xl transition-colors", "hover:bg-slate-900/5", isActive ? "text-slate-900" : "text-slate-600"].join(" ")
       }
     >
       {({ isActive }) => (
         <span className="inline-flex items-center gap-2">
           <span>{children}</span>
-          <span
-            className={[
-              "absolute left-1/2 -translate-x-1/2 -bottom-1 h-0.5 w-6 rounded-full transition-all",
-              isActive ? "bg-emerald-500 scale-100 opacity-100" : "scale-0 opacity-0",
-            ].join(" ")}
-          />
+          <span className={["absolute left-1/2 -translate-x-1/2 -bottom-1 h-0.5 w-6 rounded-full transition-all",
+            isActive ? "bg-emerald-500 scale-100 opacity-100" : "scale-0 opacity-0"].join(" ")} />
         </span>
       )}
     </NavLink>
   );
 }
 
-/** Mobile drawer navigation */
+/** Mobile drawer navigation (unchanged) */
 function MobileDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   useEffect(() => {
     try {
@@ -215,9 +201,7 @@ function MobileDrawer({ open, onClose }: { open: boolean; onClose: () => void })
   }, [open]);
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
     if (open) window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
@@ -238,48 +222,31 @@ function MobileDrawer({ open, onClose }: { open: boolean; onClose: () => void })
   return (
     <>
       <div
-        className={[
-          "fixed inset-0 z-[8000] bg-black/30 backdrop-blur-sm transition-opacity md:hidden",
-          open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
-        ].join(" ")}
+        className={["fixed inset-0 z-[8000] bg-black/30 backdrop-blur-sm transition-opacity md:hidden",
+          open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"].join(" ")}
         onClick={onClose}
         aria-hidden
       />
       <aside
-        className={[
-          "fixed top-0 left-0 z-[8050] h-full w-72 bg-white shadow-xl md:hidden transition-transform",
-          open ? "translate-x-0" : "-translate-x-full",
-        ].join(" ")}
-        role="dialog"
-        aria-label="Mobile navigation"
+        className={["fixed top-0 left-0 z-[8050] h-full w-72 bg-white shadow-xl md:hidden transition-transform",
+          open ? "translate-x-0" : "-translate-x-full"].join(" ")}
+        role="dialog" aria-label="Mobile navigation"
       >
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200">
           <div className="flex items-center gap-2">
             <div className="size-7 rounded-lg bg-gradient-to-br from-emerald-400 to-lime-500" />
             <span className="font-semibold">Cluck Hub</span>
           </div>
-          <button
-            className="rounded-lg p-2 hover:bg-slate-100"
-            aria-label="Close menu"
-            onClick={onClose}
-          >
-            ✕
-          </button>
+          <button className="rounded-lg p-2 hover:bg-slate-100" aria-label="Close menu" onClick={onClose}>✕</button>
         </div>
         <nav className="p-2">
           {links.map((l) => (
-            <NavLink
-              key={l.to}
-              to={l.to}
+            <NavLink key={l.to} to={l.to}
               className={({ isActive }) =>
-                [
-                  "block px-3 py-2 rounded-lg",
-                  "hover:bg-slate-100 transition",
-                  isActive ? "bg-slate-100 font-medium" : "text-slate-700",
-                ].join(" ")
+                ["block px-3 py-2 rounded-lg", "hover:bg-slate-100 transition",
+                  isActive ? "bg-slate-100 font-medium" : "text-slate-700"].join(" ")
               }
-              onClick={onClose}
-            >
+              onClick={onClose}>
               {l.label}
             </NavLink>
           ))}
@@ -296,7 +263,7 @@ export default function App() {
 
   return (
     <div className="min-h-dvh bg-gradient-to-b from-slate-50 to-white relative">
-      {/* Decorative soft blobs */}
+      {/* decorative blobs */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
         <div className="absolute -top-20 -left-32 w-96 h-96 rounded-full bg-emerald-200/40 blur-3xl animate-blob" />
         <div className="absolute top-1/3 -right-24 w-96 h-96 rounded-full bg-lime-200/40 blur-3xl animate-blob animation-delay-2000" />
@@ -307,16 +274,16 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="h-16 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <button
-                className="md:hidden rounded-lg p-2 hover:bg-slate-100"
-                aria-label="Open menu"
-                onClick={() => setMobileOpen(true)}
-              >
+              <button className="md:hidden rounded-lg p-2 hover:bg-slate-100" aria-label="Open menu"
+                onClick={() => setMobileOpen(true)}>
                 <span className="block w-5 h-0.5 bg-slate-800 mb-1"></span>
                 <span className="block w-5 h-0.5 bg-slate-800 mb-1"></span>
                 <span className="block w-5 h-0.5 bg-slate-800"></span>
               </button>
-              <Brand />
+              <div className="flex items-center gap-2">
+                <div className="size-8 rounded-xl bg-gradient-to-br from-emerald-400 to-lime-500 shadow-inner" />
+                <span className="font-semibold tracking-tight text-slate-900">Cluck Hub</span>
+              </div>
             </div>
 
             <nav className="hidden md:flex items-center gap-1 text-sm">
@@ -339,15 +306,11 @@ export default function App() {
 
       <main className="relative">
         <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-          <div key={routeKey} className="animate-fade-slide">
-            <Outlet />
-          </div>
+          <div key={routeKey} className="animate-fade-slide"><Outlet /></div>
         </div>
       </main>
 
       <MobileDrawer open={mobileOpen} onClose={() => setMobileOpen(false)} />
-
-      {/* Global login lightbox */}
       <LoginLightboxInline />
     </div>
   );
