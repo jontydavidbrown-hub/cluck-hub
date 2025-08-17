@@ -9,22 +9,19 @@ export default function User() {
   const { state: user, setState: setUser } =
     useServerState<{ email: string } | null>("user", null);
 
-  // Keep using your FarmContext for existing behavior (createFarm, etc.)
   const { farms = [], farmId, setFarmId, createFarm } = useFarm() as any;
 
-  // Global cloud-backed mirrors to ensure cross-device sync
-  const [globalFarms, setGlobalFarms] = useCloudSlice<any[]>("farms", [], { scope: "global" });
-  const [globalSelectedFarmId, setGlobalSelectedFarmId] =
+  // Global cloud-backed mirrors (left in place for status consistency)
+  const [globalFarms] = useCloudSlice<any[]>("farms", [], { scope: "global" });
+  const [globalSelectedFarmId] =
     useCloudSlice<string | null>("selectedFarmId", null, { scope: "global" });
 
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Prefer the global list for display/sync (fallback to context if empty)
+  // Keep local list stable by name (only used if you show any farm info here later)
   const farmsForUI: any[] = (globalFarms && globalFarms.length > 0) ? globalFarms : (farms || []);
-
-  // Keep local list stable by name
-  const farmsSorted = useMemo(
+  useMemo(
     () => [...(farmsForUI || [])].sort((a, b) => (a?.name || "").localeCompare(b?.name || "")),
     [farmsForUI]
   );
@@ -60,48 +57,7 @@ export default function User() {
     try { window.dispatchEvent(new CustomEvent("force-login")); } catch {}
   }
 
-  // --- New Farm creation local state ---
-  const [newName, setNewName] = useState("");
-
-  async function onCreateFarm() {
-    const name = newName.trim();
-    if (!name) return;
-    try {
-      await createFarm?.(name);
-      // Nudge global list so it syncs across devices immediately
-      setGlobalFarms(prev => [...(prev || []), { id: Date.now().toString(36), name }]);
-      setNewName("");
-    } catch (e) {
-      console.error("createFarm failed", e);
-    }
-  }
-
-  // Keep selected farm in sync both ways (context ↔ global)
-  useEffect(() => {
-    if (farmId !== globalSelectedFarmId) {
-      const next = farmId ?? globalSelectedFarmId ?? null;
-      setGlobalSelectedFarmId(next);
-      if (next !== farmId) setFarmId?.(next);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [farmId, globalSelectedFarmId]);
-
-  const currentSelected =
-    (globalSelectedFarmId ?? farmId ?? (farmsSorted[0]?.id ?? "")) as string;
-
-  // 🔴 Delete farm with confirmation
-  function onDeleteFarm(id: string) {
-    const name = (farmsSorted.find(f => f.id === id)?.name || "this farm");
-    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
-    setGlobalFarms(prev => {
-      const list = (prev || []).filter(f => f.id !== id);
-      const nextId = list[0]?.id ?? null;
-      setGlobalSelectedFarmId(nextId);
-      setFarmId?.(nextId);
-      return list;
-    });
-  }
-
+  // Keep your sign-in UI as-is
   return (
     <div className="animate-fade-slide space-y-6">
       <div>
@@ -139,88 +95,6 @@ export default function User() {
             </button>
           </div>
         )}
-      </div>
-
-      {/* Farm management (moved here from header) */}
-      <div className="card p-4 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <h2 className="text-lg font-semibold">Farm Management</h2>
-          {Array.isArray(farmsForUI) && farmsForUI.length > 0 && (
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-slate-600">Current farm:</label>
-              <select
-                className="border rounded-lg px-2 py-1 bg-white/80 backdrop-blur-sm shadow-sm"
-                value={currentSelected}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setGlobalSelectedFarmId(id);
-                  setFarmId?.(id);
-                }}
-              >
-                {farmsSorted.map((f: any) => (
-                  <option key={f.id} value={f.id}>
-                    {f.name || "Farm " + String(f.id).slice(0, 4)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="p-3 rounded-xl border bg-white">
-            <div className="text-sm font-medium mb-2">Your farms</div>
-            <ul className="text-sm space-y-1">
-              {(farmsSorted || []).map((f: any) => (
-                <li key={f.id} className="flex items-center justify-between">
-                  <span className={["truncate", f.id === currentSelected ? "font-semibold" : ""].join(" ")}>
-                    {f.name || "Farm " + String(f.id).slice(0, 4)}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    {f.id !== currentSelected && (
-                      <button
-                        className="text-xs rounded border px-2 py-1 hover:bg-slate-50"
-                        onClick={() => {
-                          setGlobalSelectedFarmId(f.id);
-                          setFarmId?.(f.id);
-                        }}
-                      >
-                        Switch
-                      </button>
-                    )}
-                    <button
-                      className="text-xs rounded border px-2 py-1 hover:bg-red-50 text-red-600 border-red-300"
-                      onClick={() => onDeleteFarm(f.id)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </li>
-              ))}
-              {(!farmsSorted || farmsSorted.length === 0) && (
-                <li className="text-slate-500">No farms yet.</li>
-              )}
-            </ul>
-          </div>
-
-          <div className="p-3 rounded-xl border bg-white">
-            <div className="text-sm font-medium mb-2">Create new farm</div>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 border rounded px-3 py-2"
-                placeholder="Farm name"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-              />
-              <button className="rounded bg-slate-900 text-white px-4 py-2" onClick={onCreateFarm}>
-                Create
-              </button>
-            </div>
-            <p className="mt-2 text-xs text-slate-500">
-              New farms are shared with members you invite. You can switch farms at the top of this section.
-            </p>
-          </div>
-        </div>
       </div>
     </div>
   );
