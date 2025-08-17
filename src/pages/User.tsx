@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useCloudSlice } from "../lib/cloudSlicve";
+import { useCloudSlice } from "../lib/cloudSlice";
 import { me, logout } from "../lib/session";
 
 export default function User() {
