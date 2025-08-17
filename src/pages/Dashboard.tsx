@@ -141,7 +141,7 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="rounded border p-4 bg-white">
-          <div className="text-xs text-slate-500">Total Est. Feed Consumption</div>
+          <div className="text-xs text-slate-500">Est Feed Consumption</div>
           <div className="text-2xl font-semibold">
             {(totals.totalFeedKgTodayAll / 1000).toLocaleString(undefined, {
               minimumFractionDigits: 1,
