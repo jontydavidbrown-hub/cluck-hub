@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useServerState } from "../lib/serverState";
+import { useCloudSlice } from "../lib/cloudSlice";
 import { useFarm } from "../lib/FarmContext";
 
 type Reminder = {
@@ -17,7 +17,7 @@ function emptyReminder(): Reminder {
 
 export default function Reminders() {
   const { farmId } = useFarm();
-  const [items, setItems] = useServerState<Reminder[]>("reminders", []);
+  const [items, setItems] = useCloudSlice<Reminder[]>("reminders", []);
   const [draft, setDraft] = useState<Reminder>(emptyReminder());
   const [editing, setEditing] = useState<Reminder | null>(null);
 
