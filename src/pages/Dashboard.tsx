@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useMemo } from "react";
-import { useServerState } from "../lib/serverState";
+import { useCloudSlice } from "../lib/cloudSlice";
 import { DEFAULT_SETTINGS, normalizeSettings } from "../lib/defaults";
 
 type Shed = {
@@ -20,9 +20,9 @@ function daysBetween(isoStart: string, isoEnd: string) {
 }
 
 export default function Dashboard() {
-  const { state: shedsRaw } = useServerState<any>("sheds", []);
+  const { state: shedsRaw } = useCloudSlice<any>("sheds", []);
   // ✅ Always load settings with defaults and normalize before use
-  const { state: settingsRaw } = useServerState<Settings>("settings", DEFAULT_SETTINGS);
+  const { state: settingsRaw } = useCloudSlice<Settings>("settings", DEFAULT_SETTINGS);
   const settings = normalizeSettings(settingsRaw);
 
   const sheds: Shed[] = useMemo(() => {
