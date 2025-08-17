@@ -17,6 +17,8 @@
     @apply rounded-2xl border border-slate-200 bg-white/90 backdrop-blur-sm shadow-sm;
   }
 }
+/* keep placeholders from getting in the way on number inputs */
+input[type="number"]::placeholder { color: transparent; opacity: 0; }
 
 /* ---------- Animations ---------- */
 @keyframes fade-slide {
