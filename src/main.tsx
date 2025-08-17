@@ -11,7 +11,7 @@ import ErrorBoundary from "./lib/ErrorBoundary";
 import Dashboard from "./pages/Dashboard";
 import DailyLog from "./pages/DailyLog";
 import Weights from "./pages/Weights";
-import Feed from "./pages/Feed";          // if your file is FeedSilos.tsx, change this import
+import Feed from "./pages/FeedSilos";          // if your file is FeedSilos.tsx, change this import
 import Water from "./pages/Water";
 import Reminders from "./pages/Reminders";
 import Setup from "./pages/Setup";
