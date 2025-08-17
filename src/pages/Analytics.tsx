@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, Legend } from "recharts";
-import { useCloudSlice } from "../lib/serverState";
+import { useCloudSlice } from "../lib/cloudSlice";
 import { useFarm } from "../lib/FarmContext";
 
 type DailyRow = { date: string; shed?: string; mortalities?: number; culls?: number; notes?: string };
@@ -12,10 +12,10 @@ function sortByDate<T extends { date: string }>(arr: T[]) { return [...arr].sort
 
 export default function Analytics() {
   const { farmId } = useFarm();
-  const [dailyLog] = useServerState<DailyRow[]>("dailyLog", []);
-  const [waterLogs] = useServerState<WaterRow[]>("waterLogs", []);
-  const [deliveries] = useServerState<Delivery[]>("deliveries", []);
-  const [shedsRaw] = useServerState<any>("sheds", []);
+  const [dailyLog] = useCloudSlice<DailyRow[]>("dailyLog", []);
+  const [waterLogs] = useCloudSlice<WaterRow[]>("waterLogs", []);
+  const [deliveries] = useCloudSlice<Delivery[]>("deliveries", []);
+  const [shedsRaw] = useCloudSlice<any>("sheds", []);
   const sheds: Shed[] = Array.isArray(shedsRaw)
     ? shedsRaw.map((x: any) => (typeof x === "string" ? { id: x, name: x } : x)).filter(Boolean)
     : [];
