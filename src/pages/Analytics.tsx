@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, Legend } from "recharts";
-import { useServerState } from "../lib/serverState";
+import { useCloudSlice } from "../lib/serverState";
 import { useFarm } from "../lib/FarmContext";
 
 type DailyRow = { date: string; shed?: string; mortalities?: number; culls?: number; notes?: string };
