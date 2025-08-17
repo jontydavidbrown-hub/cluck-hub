@@ -21,8 +21,11 @@ export default function Setup() {
   const [settings, setSettings] = useCloudSlice<Settings>("settings", {});
   const [sheds, setSheds] = useCloudSlice<Shed[]>("sheds", []);
 
-  // --- Batch length uses a local draft so you can clear / retype easily ---
+  // Batch length uses a local draft so you can clear/retype easily
   const [batchDraft, setBatchDraft] = useState<string>("");
+
+  // UI save indicator
+  const [justSaved, setJustSaved] = useState(false);
 
   useEffect(() => {
     const v = settings.batchLengthDays;
@@ -32,6 +35,7 @@ export default function Setup() {
   function commitBatchLength() {
     const raw = batchDraft.trim();
     if (raw === "") {
+      // Commit a minimum of 1 on empty
       setSettings((prev) => ({ ...prev, batchLengthDays: 1 }));
       setBatchDraft("1");
       return;
@@ -41,7 +45,20 @@ export default function Setup() {
     setBatchDraft(String(n));
   }
 
-  // --- Sheds helpers ---
+  async function handleSave() {
+    // Ensure any draft is committed
+    commitBatchLength();
+
+    // Force a push even if arrays/objects didn't structurally change
+    setSettings((prev) => ({ ...prev }));
+    setSheds((prev) => ([...(prev || [])]));
+
+    // Little “Saved” feedback
+    setJustSaved(true);
+    window.setTimeout(() => setJustSaved(false), 1500);
+  }
+
+  // Sheds helpers
   const shedsSorted = useMemo(
     () => [...(sheds || [])].sort((a, b) => (a.name || "").localeCompare(b.name || "")),
     [sheds]
@@ -67,7 +84,18 @@ export default function Setup() {
 
   return (
     <div className="p-4 space-y-6">
-      <h1 className="text-2xl font-semibold">Setup</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Setup</h1>
+        <div className="flex items-center gap-2">
+          {justSaved && <span className="text-sm text-green-600">Saved ✓</span>}
+          <button
+            className="rounded bg-slate-900 text-white px-4 py-2"
+            onClick={handleSave}
+          >
+            Save
+          </button>
+        </div>
+      </div>
 
       {/* Batch settings */}
       <div className="card p-4 space-y-4">
@@ -104,7 +132,7 @@ export default function Setup() {
             value={newShedName}
             onChange={(e) => setNewShedName(e.target.value)}
           />
-          <button
+        <button
             className="rounded bg-slate-900 text-white px-4 py-2"
             onClick={() => { addShed(newShedName); setNewShedName(""); }}
           >
