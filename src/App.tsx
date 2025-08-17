@@ -26,3 +26,8 @@ export async function signup(email: string, password: string) {
 export async function logout() {
   await fetch("/.netlify/functions/auth?action=logout", { method: "POST", credentials: "include" });
 }
+function App() {
+  // ...everything...
+}
+
+export default App;   // << add this if it’s missing
