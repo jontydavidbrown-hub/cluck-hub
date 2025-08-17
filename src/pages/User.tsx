@@ -12,7 +12,7 @@ export default function User() {
   // Keep using your FarmContext for existing behavior (createFarm, etc.)
   const { farms = [], farmId, setFarmId, createFarm } = useFarm() as any;
 
-  // 🔁 New: global cloud-backed mirrors to ensure cross-device sync
+  // Global cloud-backed mirrors to ensure cross-device sync
   const [globalFarms, setGlobalFarms] = useCloudSlice<any[]>("farms", [], { scope: "global" });
   const [globalSelectedFarmId, setGlobalSelectedFarmId] =
     useCloudSlice<string | null>("selectedFarmId", null, { scope: "global" });
@@ -67,23 +67,18 @@ export default function User() {
     const name = newName.trim();
     if (!name) return;
     try {
-      // Keep your existing behavior
       await createFarm?.(name);
-
-      // Nudge global list so it syncs across devices immediately.
-      // (If your provider updates the global "farms" itself, this is harmless.)
+      // Nudge global list so it syncs across devices immediately
       setGlobalFarms(prev => [...(prev || []), { id: Date.now().toString(36), name }]);
-
       setNewName("");
     } catch (e) {
       console.error("createFarm failed", e);
     }
   }
 
-  // 🔗 Keep selected farm in sync both ways (context ↔ global)
+  // Keep selected farm in sync both ways (context ↔ global)
   useEffect(() => {
     if (farmId !== globalSelectedFarmId) {
-      // Prefer the explicit user selection if present
       const next = farmId ?? globalSelectedFarmId ?? null;
       setGlobalSelectedFarmId(next);
       if (next !== farmId) setFarmId?.(next);
@@ -93,6 +88,19 @@ export default function User() {
 
   const currentSelected =
     (globalSelectedFarmId ?? farmId ?? (farmsSorted[0]?.id ?? "")) as string;
+
+  // 🔴 Delete farm with confirmation
+  function onDeleteFarm(id: string) {
+    const name = (farmsSorted.find(f => f.id === id)?.name || "this farm");
+    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    setGlobalFarms(prev => {
+      const list = (prev || []).filter(f => f.id !== id);
+      const nextId = list[0]?.id ?? null;
+      setGlobalSelectedFarmId(nextId);
+      setFarmId?.(nextId);
+      return list;
+    });
+  }
 
   return (
     <div className="animate-fade-slide space-y-6">
@@ -168,17 +176,25 @@ export default function User() {
                   <span className={["truncate", f.id === currentSelected ? "font-semibold" : ""].join(" ")}>
                     {f.name || "Farm " + String(f.id).slice(0, 4)}
                   </span>
-                  {f.id !== currentSelected && (
+                  <div className="flex items-center gap-2">
+                    {f.id !== currentSelected && (
+                      <button
+                        className="text-xs rounded border px-2 py-1 hover:bg-slate-50"
+                        onClick={() => {
+                          setGlobalSelectedFarmId(f.id);
+                          setFarmId?.(f.id);
+                        }}
+                      >
+                        Switch
+                      </button>
+                    )}
                     <button
-                      className="text-xs rounded border px-2 py-1 hover:bg-slate-50"
-                      onClick={() => {
-                        setGlobalSelectedFarmId(f.id);
-                        setFarmId?.(f.id);
-                      }}
+                      className="text-xs rounded border px-2 py-1 hover:bg-red-50 text-red-600 border-red-300"
+                      onClick={() => onDeleteFarm(f.id)}
                     >
-                      Switch
+                      Delete
                     </button>
-                  )}
+                  </div>
                 </li>
               ))}
               {(!farmsSorted || farmsSorted.length === 0) && (
