@@ -33,7 +33,6 @@ function emptyRow(): Row {
   return {
     id: crypto.randomUUID(),
     date: today,
-    // leave numbers undefined so inputs show transparent placeholders
     morts: undefined,
     cullRunts: undefined,
     cullLegs: undefined,
@@ -68,7 +67,7 @@ export default function Morts() {
   const [rows, setRows] = useCloudSlice<Row[]>("dailyLog", []);
   const [sheds] = useCloudSlice<Shed[]>("sheds", []);
 
-  // --- Top-level Shed selection (big box) ---
+  // Top-level Shed selection
   const shedNames = useMemo(
     () => (sheds || []).map(s => s.name || "").filter(Boolean).sort((a, b) => a.localeCompare(b)),
     [sheds]
@@ -76,45 +75,39 @@ export default function Morts() {
 
   const [selectedShed, setSelectedShed] = useState<string>("");
 
-  // Initialize selected shed from URL or first available
   useEffect(() => {
     if (selectedShed) return;
     if (preselectShed) setSelectedShed(preselectShed);
     else if (shedNames.length) setSelectedShed(shedNames[0]);
   }, [preselectShed, shedNames, selectedShed]);
 
-  // Lookup placementDate for day age
+  // Lookup placementDate + placed birds for summaries
   const placementByShed = useMemo(() => {
-    const m = new Map<string, string | undefined>();
+    const m = new Map<string, { date?: string; placed: number }>();
     for (const s of sheds || []) {
       const name = (s.name || "").trim();
-      if (name) m.set(name, s.placementDate);
+      if (!name) continue;
+      const placed = Number(s.birdsPlaced ?? s.placementBirds) || 0;
+      m.set(name, { date: s.placementDate, placed });
     }
     return m;
   }, [sheds]);
 
-  // Filtered, sorted entries for the selected shed
+  // Rows for selected shed
   const shedRows = useMemo(() => {
     const list = (rows || []).filter(r => (r.shed || "") === (selectedShed || ""));
     return list.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   }, [rows, selectedShed]);
 
-  // Draft row (shed taken from selectedShed)
+  // Draft (shed applied on save)
   const [draft, setDraft] = useState<Row>(emptyRow());
-
-  // If shed changes, keep draft but its shed will be applied only when saving
   useEffect(() => {
-    // keep date; reset numbers to undefined so placeholders appear for new shed entry
-    setDraft(d => ({
-      ...emptyRow(),
-      date: d.date || new Date().toISOString().slice(0, 10),
-    }));
+    setDraft(d => ({ ...emptyRow(), date: d.date || new Date().toISOString().slice(0, 10) }));
   }, [selectedShed]);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [edit, setEdit] = useState<Row | null>(null);
 
-  // ---- CRUD helpers
   function normalize(r: Row): Row {
     const morts = clampNum(r.morts);
     const cRunts = clampNum(r.cullRunts);
@@ -140,7 +133,6 @@ export default function Morts() {
     const cleaned = normalize({
       ...draft,
       shed: selectedShed,
-      // Ensure undefined numeric fields become 0 on save
       morts: draft.morts ?? 0,
       cullRunts: draft.cullRunts ?? 0,
       cullLegs: draft.cullLegs ?? 0,
@@ -153,7 +145,6 @@ export default function Morts() {
 
   function startEdit(r: Row) {
     setEditingId(r.id);
-    // In this table we edit only numbers; date remains part of the entry but is hidden.
     setEdit({ ...r });
   }
 
@@ -170,14 +161,25 @@ export default function Morts() {
     setRows((rows || []).filter(r => r.id !== id));
   }
 
-  // ---- UI
+  // --- Summary tiles for the selected shed ---
+  const summary = useMemo(() => {
+    const place = placementByShed.get(selectedShed || "");
+    const placed = place?.placed ?? 0;
+    const totalMorts = (shedRows || []).reduce(
+      (sum, r) => sum + (Number(r.morts) || 0) + sumCulls(r),
+      0
+    );
+    const pct = placed > 0 ? (totalMorts / placed) * 100 : 0;
+    return { placed, totalMorts, pct };
+  }, [placementByShed, selectedShed, shedRows]);
+
   return (
     <div className="p-4 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Morts</h1>
       </div>
 
-      {/* Top Shed Number selector */}
+      {/* Shed selector */}
       <div className="p-4 border rounded-2xl bg-white">
         <label className="block text-sm mb-1">Shed Number</label>
         {shedNames.length > 0 ? (
@@ -197,7 +199,21 @@ export default function Morts() {
         )}
       </div>
 
-      {/* Add form (no shed input, no notes) */}
+      {/* NEW: Summary tiles */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="rounded border p-4 bg-white">
+          <div className="text-xs text-slate-500">Total Morts</div>
+          <div className="text-2xl font-semibold">{summary.totalMorts}</div>
+        </div>
+        <div className="rounded border p-4 bg-white">
+          <div className="text-xs text-slate-500">% of Placed Birds</div>
+          <div className="text-2xl font-semibold">
+            {summary.placed > 0 ? summary.pct.toFixed(1) : "0.0"}%
+          </div>
+        </div>
+      </div>
+
+      {/* Add form (no shed, no notes) */}
       <div className="p-4 border rounded-2xl bg-white">
         <div className="font-medium mb-3">Add entry</div>
         <div className="grid md:grid-cols-6 gap-3">
@@ -298,8 +314,8 @@ export default function Morts() {
             </thead>
             <tbody>
               {shedRows.map((r) => {
-                const placement = placementByShed.get(selectedShed || "");
-                const age = placement ? daysBetweenUTC(placement, r.date) : undefined;
+                const place = placementByShed.get(selectedShed || "");
+                const age = place?.date ? daysBetweenUTC(place.date, r.date) : undefined;
                 const total = (Number(r.morts) || 0) + sumCulls(r);
                 const isEditing = editingId === r.id;
 
@@ -423,8 +439,7 @@ export default function Morts() {
           </table>
         </div>
       </div>
-
-      {/* (Removed) second per-shed breakdown section */}
+      {/* (Second breakdown removed) */}
     </div>
   );
 }
