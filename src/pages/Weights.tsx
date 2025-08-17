@@ -1,351 +1,247 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useCloudSlice } from "../lib/cloudSlice";
-import { generateWeightsPdf } from "../lib/pdf";
+import { useLocation } from "react-router-dom";
 
-type Shed = { id: string; name: string };
-type ShedWeights = {
-  shed: string;
-  birdsPerBucket: number;
-  buckets: number[];     // kg per bucket
+type WeightRow = {
+  id: string;
+  date: string;        // YYYY-MM-DD
+  shed?: string;
+  avgWeight?: number;  // grams
+  sample?: number;     // n birds sampled
   notes?: string;
-  createdAt: string;     // ISO
 };
-type WeightsByShed = Record<string, ShedWeights[]>;
 
-const SHEDS_KEY = "sheds";
-const WEIGHTS_KEY = "weightsByShed";
-
-function loadFromLS<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
+function newId() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
-function saveToLS<T>(key: string, value: T) {
-  localStorage.setItem(key, JSON.stringify(value));
+function todayYmd() {
+  return new Date().toISOString().slice(0, 10);
 }
-
-function Stat({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
-  return (
-    <div className="card p-4">
-      <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
-      {sub && <div className="text-xs text-slate-500 mt-1">{sub}</div>}
-    </div>
-  );
-}
-
-function SectionCard({ title, children, actions }: { title: string; children: React.ReactNode; actions?: React.ReactNode }) {
-  return (
-    <div className="card overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-gradient-to-b from-white to-slate-50">
-        <h2 className="text-sm font-semibold text-slate-800">{title}</h2>
-        <div className="flex items-center gap-2">{actions}</div>
-      </div>
-      <div className="p-4">{children}</div>
-    </div>
-  );
+function emptyRow(): WeightRow {
+  return { id: newId(), date: todayYmd(), shed: "", avgWeight: undefined, sample: undefined, notes: "" };
 }
 
 export default function Weights() {
-  // keep a hook into server state (unchanged behavior) even though this slice uses LS
-  const server = useCloudSlice() as any;
+  // Keep the same slice key ("weights"); change this line only if your repo uses a different key.
+  const [rows, setRows] = useCloudSlice<WeightRow[]>("weights", []);
+  const [draft, setDraft] = useState<WeightRow>(emptyRow());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [edit, setEdit] = useState<WeightRow | null>(null);
 
-  // Sheds and weights
-  const [sheds, setSheds] = useState<Shed[]>([]);
-  const [byShed, setByShed] = useState<WeightsByShed>({});
-
-  // Form state
-  const [shedId, setShedId] = useState<string>("");
-  const [birdsPerBucket, setBirdsPerBucket] = useState<number>(0);
-  const [bucketKg, setBucketKg] = useState<string>(""); // input field
-  const [buckets, setBuckets] = useState<number[]>([]);
-  const [notes, setNotes] = useState<string>("");
-  const bucketInputRef = useRef<HTMLInputElement>(null);
-
-  // Initial load
+  // ✅ Preselect shed from query (?shed=...)
+  const location = useLocation();
+  const weightRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    setSheds(loadFromLS<Shed[]>(SHEDS_KEY, server?.sheds ?? []));
-    setByShed(loadFromLS<WeightsByShed>(WEIGHTS_KEY, server?.weightsByShed ?? {}));
-  }, [server?.sheds, server?.weightsByShed]);
-
-  // Ensure a shed is selected
-  useEffect(() => {
-    if (!shedId && sheds.length) setShedId(sheds[0].id);
-  }, [shedId, sheds]);
-
-  // Derived stats
-  const flatAll = useMemo(() => Object.values(byShed).flat(), [byShed]);
-  const totalBuckets = flatAll.reduce((acc, rec) => acc + rec.buckets.length, 0);
-  const totalKg = flatAll.reduce((acc, rec) => acc + rec.buckets.reduce((a, b) => a + b, 0), 0);
-  const totalBirds = flatAll.reduce((acc, rec) => acc + rec.birdsPerBucket * rec.buckets.length, 0);
-  const avgPerBird = totalBirds ? (totalKg / totalBirds) : 0;
-
-  function addBucket() {
-    const val = parseFloat(bucketKg);
-    if (!isFinite(val) || val <= 0) return;
-    setBuckets((b) => [...b, Number(val.toFixed(2))]);
-    setBucketKg("");
-    bucketInputRef.current?.focus();
-  }
-  function removeBucket(i: number) {
-    setBuckets((b) => b.filter((_, idx) => idx !== i));
-  }
-  function resetForm() {
-    setBuckets([]);
-    setBucketKg("");
-    setNotes("");
-  }
-  function saveRecord() {
-    if (!shedId) return;
-    if (!birdsPerBucket || birdsPerBucket <= 0) return;
-    if (buckets.length === 0) return;
-    const entry: ShedWeights = {
-      shed: shedId,
-      birdsPerBucket,
-      buckets: [...buckets],
-      notes: notes.trim() || undefined,
-      createdAt: new Date().toISOString(),
-    };
-    const next = { ...(byShed || {}) };
-    if (!next[shedId]) next[shedId] = [];
-    next[shedId] = [entry, ...next[shedId]];
-    setByShed(next);
-    saveToLS(WEIGHTS_KEY, next);
-    resetForm();
-  }
-  function deleteRecord(shed: string, idx: number) {
-    const list = [...(byShed[shed] || [])];
-    list.splice(idx, 1);
-    const next = { ...byShed, [shed]: list };
-    setByShed(next);
-    saveToLS(WEIGHTS_KEY, next);
-  }
-
-  function exportPdf() {
-    try {
-      generateWeightsPdf(byShed);
-    } catch (e) {
-      console.error("PDF export failed", e);
-      alert("Failed to generate PDF.");
+    const params = new URLSearchParams(location.search);
+    const preset = params.get("shed") || "";
+    if (preset) setDraft((d) => ({ ...d, shed: preset }));
+    // optional nicety: focus avg weight on entry when presetting shed
+    if (preset) {
+      const t = window.setTimeout(() => weightRef.current?.focus(), 0);
+      return () => window.clearTimeout(t);
     }
-  }
+  }, [location.search]);
+
+  const sorted = useMemo(
+    () => [...(rows || [])].sort((a, b) => a.date.localeCompare(b.date)),
+    [rows]
+  );
+
+  const addRow = () => {
+    if (!draft.date) return;
+    const cleaned: WeightRow = {
+      ...draft,
+      avgWeight: draft.avgWeight == null || (draft.avgWeight as any) === "" ? undefined : Number(draft.avgWeight) || 0,
+      sample: draft.sample == null || (draft.sample as any) === "" ? undefined : Math.max(0, Number(draft.sample) || 0),
+      id: draft.id || newId(),
+    };
+    setRows((prev) => [...(prev || []), cleaned]);
+    setDraft(emptyRow());
+  };
+
+  const startEdit = (r: WeightRow) => {
+    setEditingId(r.id);
+    setEdit({ ...r });
+  };
+
+  const saveEdit = () => {
+    if (!edit) return;
+    const cleaned: WeightRow = {
+      ...edit,
+      avgWeight: edit.avgWeight == null || (edit.avgWeight as any) === "" ? undefined : Number(edit.avgWeight) || 0,
+      sample: edit.sample == null || (edit.sample as any) === "" ? undefined : Math.max(0, Number(edit.sample) || 0),
+    };
+    setRows((prev) => prev.map((r) => (r.id === cleaned.id ? cleaned : r)));
+    setEditingId(null);
+    setEdit(null);
+  };
+
+  const remove = (id: string) => {
+    if (!confirm("Remove this entry?")) return;
+    setRows((prev) => prev.filter((r) => r.id !== id));
+  };
 
   return (
-    <div className="weights-page animate-fade-slide">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold">Weights</h1>
-          <p className="text-sm text-slate-600">Record bucket weights and compute average bird weights per shed.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={exportPdf}
-            className="rounded-lg border border-slate-200 bg-white hover:bg-slate-50 px-3 py-2 text-sm shadow-sm transition"
-          >
-            Export PDF
-          </button>
-        </div>
+    <div className="p-4 space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Weights</h1>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <Stat label="Total buckets" value={totalBuckets} />
-        <Stat label="Total kg" value={totalKg.toFixed(1)} sub="All sheds" />
-        <Stat label="Total birds" value={totalBirds} />
-        <Stat label="Avg kg / bird" value={avgPerBird ? avgPerBird.toFixed(3) : "0.000"} />
-      </div>
-
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Form */}
-        <SectionCard
-          title="Add weights"
-          actions={
-            <button
-              onClick={resetForm}
-              className="rounded-lg border border-slate-200 bg-white hover:bg-slate-50 px-3 py-1.5 text-sm shadow-sm transition"
-            >
-              Reset
-            </button>
-          }
-        >
-          <div className="grid grid-cols-1 gap-4">
-            <label className="block">
-              <div className="text-xs font-medium mb-1 text-slate-700">Shed</div>
-              <select
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm"
-                value={shedId}
-                onChange={(e) => setShedId(e.target.value)}
-              >
-                {sheds.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name || s.id}</option>
-                ))}
-              </select>
-            </label>
-
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block">
-                <div className="text-xs font-medium mb-1 text-slate-700">Birds per bucket</div>
-                <input
-                  type="number"
-                  min={1}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm"
-                  value={birdsPerBucket || ""}
-                  onChange={(e) => setBirdsPerBucket(Number(e.target.value))}
-                  placeholder="e.g. 10"
-                />
-              </label>
-
-              <label className="block">
-                <div className="text-xs font-medium mb-1 text-slate-700">Add bucket (kg)</div>
-                <div className="flex gap-2">
-                  <input
-                    ref={bucketInputRef}
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm"
-                    value={bucketKg}
-                    onChange={(e) => setBucketKg(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") addBucket(); }}
-                    placeholder="e.g. 12.50"
-                  />
-                  <button
-                    type="button"
-                    onClick={addBucket}
-                    className="rounded-lg bg-slate-900 text-white px-4 py-2 shadow-sm hover:opacity-95 transition"
-                  >
-                    Add
-                  </button>
-                </div>
-              </label>
-            </div>
-
-            {buckets.length > 0 && (
-              <div className="rounded-xl border border-slate-200 bg-white/80 p-3 shadow-sm">
-                <div className="text-xs font-medium text-slate-700 mb-2">Current buckets</div>
-                <div className="flex flex-wrap gap-2">
-                  {buckets.map((kg, i) => (
-                    <span
-                      key={i}
-                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-sm shadow-sm"
-                    >
-                      {kg.toFixed(2)} kg
-                      <button
-                        className="text-slate-500 hover:text-red-600 transition"
-                        onClick={() => removeBucket(i)}
-                        aria-label="Remove bucket"
-                        title="Remove"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <label className="block">
-              <div className="text-xs font-medium mb-1 text-slate-700">Notes (optional)</div>
-              <textarea
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm min-h-24"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Any details to remember…"
-              />
-            </label>
-
-            <div className="flex items-center justify-end gap-2">
-              <button
-                onClick={saveRecord}
-                className="rounded-xl bg-emerald-600 text-white px-4 py-2 shadow-sm hover:opacity-95 transition disabled:opacity-50"
-                disabled={!shedId || !birdsPerBucket || buckets.length === 0}
-              >
-                Save record
-              </button>
-            </div>
+      {/* Add form */}
+      <div className="p-4 border rounded-2xl bg-white">
+        <div className="font-medium mb-3">Add weights</div>
+        <div className="grid md:grid-cols-6 gap-3">
+          <div>
+            <label className="block text-sm mb-1">Date</label>
+            <input
+              type="date"
+              className="w-full border rounded px-2 py-1"
+              value={draft.date}
+              onChange={(e) => setDraft({ ...draft, date: e.target.value })}
+            />
           </div>
-        </SectionCard>
 
-        {/* Per-shed tables */}
-        <div className="lg:col-span-2 space-y-6">
-          {sheds.map((shed) => {
-            const list = (byShed[shed.id] || []);
-            const shedKg = list.reduce((a, rec) => a + rec.buckets.reduce((x, y) => x + y, 0), 0);
-            const shedBuckets = list.reduce((a, rec) => a + rec.buckets.length, 0);
-            const shedBirds = list.reduce((a, rec) => a + (rec.birdsPerBucket * rec.buckets.length), 0);
-            const shedAvg = shedBirds ? (shedKg / shedBirds) : 0;
+          <div>
+            <label className="block text-sm mb-1">Shed</label>
+            <input
+              type="text"
+              className="w-full border rounded px-2 py-1"
+              placeholder="e.g., Shed 1"
+              value={draft.shed ?? ""}
+              onChange={(e) => setDraft({ ...draft, shed: e.target.value })}
+            />
+          </div>
 
-            return (
-              <SectionCard
-                key={shed.id}
-                title={shed.name || shed.id}
-                actions={
-                  <div className="flex items-center gap-2 text-xs text-slate-600">
-                    <span className="px-2 py-1 rounded-full border border-slate-200 bg-white shadow-sm">Buckets: {shedBuckets}</span>
-                    <span className="px-2 py-1 rounded-full border border-slate-200 bg-white shadow-sm">Kg: {shedKg.toFixed(1)}</span>
-                    <span className="px-2 py-1 rounded-full border border-slate-200 bg-white shadow-sm">Avg kg/bird: {shedAvg.toFixed(3)}</span>
-                  </div>
-                }
-              >
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="text-left text-slate-600">
-                      <tr className="border-b border-slate-200">
-                        <th className="py-2 pr-3">Date</th>
-                        <th className="py-2 px-3">Birds / bucket</th>
-                        <th className="py-2 px-3">Buckets (kg)</th>
-                        <th className="py-2 px-3">Avg kg / bird</th>
-                        <th className="py-2 pl-3 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {list.map((rec, idx) => {
-                        const kg = rec.buckets.reduce((a, b) => a + b, 0);
-                        const birds = rec.birdsPerBucket * rec.buckets.length;
-                        const avg = birds ? kg / birds : 0;
-                        const date = new Date(rec.createdAt).toLocaleString();
-                        return (
-                          <tr key={idx} className="border-b last:border-0 border-slate-100 hover:bg-slate-50/60">
-                            <td className="py-2 pr-3 whitespace-nowrap">{date}</td>
-                            <td className="py-2 px-3">{rec.birdsPerBucket}</td>
-                            <td className="py-2 px-3">
-                              <div className="flex flex-wrap gap-1">
-                                {rec.buckets.map((b, i) => (
-                                  <span key={i} className="inline-block rounded-full px-2 py-0.5 border border-slate-200 bg-white shadow-sm">
-                                    {b.toFixed(2)}
-                                  </span>
-                                ))}
-                              </div>
-                            </td>
-                            <td className="py-2 px-3">{avg.toFixed(3)}</td>
-                            <td className="py-2 pl-3 text-right">
-                              <button
-                                className="text-xs rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 px-2 py-1 transition"
-                                onClick={() => deleteRecord(shed.id, idx)}
-                              >
-                                Delete
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {!list.length && (
-                        <tr><td className="p-6 text-slate-500" colSpan={5}>No records.</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </SectionCard>
-            );
-          })}
+          <div>
+            <label className="block text-sm mb-1">Avg weight (g)</label>
+            <input
+              ref={weightRef}
+              type="number" step="1" min={0}
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
+              placeholder="0"
+              value={draft.avgWeight ?? ""}
+              onChange={(e) => setDraft({ ...draft, avgWeight: e.target.value === "" ? undefined : Number(e.target.value) })}
+            />
+          </div>
 
-          {!Object.keys(byShed || {}).length && (
-            <div className="text-slate-500">No weight records yet.</div>
-          )}
+          <div>
+            <label className="block text-sm mb-1">Sample size</label>
+            <input
+              type="number" step="1" min={0}
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
+              placeholder="0"
+              value={draft.sample ?? ""}
+              onChange={(e) => setDraft({ ...draft, sample: e.target.value === "" ? undefined : Number(e.target.value) })}
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-sm mb-1">Notes</label>
+            <input
+              className="w-full border rounded px-2 py-1"
+              value={draft.notes ?? ""}
+              onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
+            />
+          </div>
+        </div>
+
+        <div className="mt-3">
+          <button className="px-4 py-2 rounded bg-black text-white" onClick={addRow}>Add</button>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="p-4 border rounded-2xl bg-white">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="py-2 pr-2">Date</th>
+                <th className="py-2 pr-2">Shed</th>
+                <th className="py-2 pr-2">Avg weight (g)</th>
+                <th className="py-2 pr-2">Sample</th>
+                <th className="py-2 pr-2">Notes</th>
+                <th className="py-2 pr-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => (
+                <tr key={r.id} className="border-b">
+                  <td className="py-2 pr-2">
+                    {editingId === r.id ? (
+                      <input
+                        type="date"
+                        className="border rounded px-2 py-1"
+                        value={edit?.date || ""}
+                        onChange={(e) => setEdit((s) => ({ ...(s as WeightRow), date: e.target.value }))}
+                      />
+                    ) : r.date}
+                  </td>
+
+                  <td className="py-2 pr-2">
+                    {editingId === r.id ? (
+                      <input
+                        className="border rounded px-2 py-1"
+                        value={edit?.shed || ""}
+                        onChange={(e) => setEdit((s) => ({ ...(s as WeightRow), shed: e.target.value }))}
+                      />
+                    ) : (r.shed || "")}
+                  </td>
+
+                  <td className="py-2 pr-2">
+                    {editingId === r.id ? (
+                      <input
+                        type="number" step="1" min={0}
+                        className="border rounded px-2 py-1 placeholder-transparent"
+                        placeholder="0"
+                        value={edit?.avgWeight ?? ""}
+                        onChange={(e) => setEdit((s) => ({ ...(s as WeightRow), avgWeight: e.target.value === "" ? undefined : Number(e.target.value) }))}
+                      />
+                    ) : (r.avgWeight != null ? Number(r.avgWeight).toFixed(0) : "—")}
+                  </td>
+
+                  <td className="py-2 pr-2">
+                    {editingId === r.id ? (
+                      <input
+                        type="number" step="1" min={0}
+                        className="border rounded px-2 py-1 placeholder-transparent"
+                        placeholder="0"
+                        value={edit?.sample ?? ""}
+                        onChange={(e) => setEdit((s) => ({ ...(s as WeightRow), sample: e.target.value === "" ? undefined : Number(e.target.value) }))}
+                      />
+                    ) : (r.sample != null ? r.sample : "—")}
+                  </td>
+
+                  <td className="py-2 pr-2">
+                    {editingId === r.id ? (
+                      <input
+                        className="border rounded px-2 py-1"
+                        value={edit?.notes || ""}
+                        onChange={(e) => setEdit((s) => ({ ...(s as WeightRow), notes: e.target.value }))}
+                      />
+                    ) : (r.notes || "")}
+                  </td>
+
+                  <td className="py-2 pr-2">
+                    {editingId === r.id ? (
+                      <div className="flex gap-2">
+                        <button className="px-2 py-1 border rounded" onClick={saveEdit}>Save</button>
+                        <button className="px-2 py-1 border rounded" onClick={() => { setEditingId(null); setEdit(null); }}>Cancel</button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button className="px-2 py-1 border rounded" onClick={() => startEdit(r)}>Edit</button>
+                        <button className="px-2 py-1 border rounded text-red-600" onClick={() => remove(r.id)}>Remove</button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {sorted.length === 0 && (
+                <tr><td className="py-6 text-gray-500" colSpan={6}>No weights yet.</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
