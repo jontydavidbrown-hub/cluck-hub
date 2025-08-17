@@ -7,8 +7,8 @@ type Row = {
   id: string;
   date: string;            // YYYY-MM-DD
   shed?: string;
-  mortalities?: number;
-  culls?: number;
+  mortalities?: number;    // optional so placeholder can show
+  culls?: number;          // optional so placeholder can show
   notes?: string;
 };
 
@@ -17,7 +17,8 @@ function newId() {
 }
 function emptyRow(): Row {
   const today = new Date().toISOString().slice(0, 10);
-  return { id: newId(), date: today, shed: "", mortalities: 0, culls: 0, notes: "" };
+  // make numeric fields undefined so inputs can show placeholder ""
+  return { id: newId(), date: today, shed: "", mortalities: undefined, culls: undefined, notes: "" };
 }
 
 export default function DailyLog() {
@@ -43,8 +44,8 @@ export default function DailyLog() {
     if (!draft.date) return;
     const cleaned: Row = {
       ...draft,
-      mortalities: Number(draft.mortalities) || 0,
-      culls: Number(draft.culls) || 0,
+      mortalities: Number(draft.mortalities ?? 0) || 0,
+      culls: Number(draft.culls ?? 0) || 0,
       id: draft.id || newId(),
     };
     setRows(prev => [...(prev || []), cleaned]);
@@ -58,10 +59,10 @@ export default function DailyLog() {
 
   const saveEdit = () => {
     if (!edit) return;
-    const cleaned = {
+    const cleaned: Row = {
       ...edit,
-      mortalities: Number(edit.mortalities) || 0,
-      culls: Number(edit.culls) || 0,
+      mortalities: Number(edit.mortalities ?? 0) || 0,
+      culls: Number(edit.culls ?? 0) || 0,
     };
     setRows(prev => prev.map(r => (r.id === cleaned.id ? cleaned : r)));
     setEditingId(null);
@@ -116,8 +117,8 @@ export default function DailyLog() {
               type="number" min={0}
               className="w-full border rounded px-2 py-1 placeholder-transparent"
               placeholder="0"
-              value={draft.mortalities ?? 0}
-              onChange={e => setDraft({ ...draft, mortalities: Number(e.target.value) })}
+              value={draft.mortalities ?? ""}
+              onChange={e => setDraft({ ...draft, mortalities: e.target.value === "" ? undefined : Number(e.target.value) })}
             />
           </div>
           <div>
@@ -126,8 +127,8 @@ export default function DailyLog() {
               type="number" min={0}
               className="w-full border rounded px-2 py-1 placeholder-transparent"
               placeholder="0"
-              value={draft.culls ?? 0}
-              onChange={e => setDraft({ ...draft, culls: Number(e.target.value) })}
+              value={draft.culls ?? ""}
+              onChange={e => setDraft({ ...draft, culls: e.target.value === "" ? undefined : Number(e.target.value) })}
             />
           </div>
           <div className="md:col-span-2">
@@ -187,10 +188,10 @@ export default function DailyLog() {
                         type="number" min={0}
                         className="border rounded px-2 py-1 placeholder-transparent"
                         placeholder="0"
-                        value={edit?.mortalities ?? 0}
-                        onChange={e => setEdit(s => ({ ...(s as Row), mortalities: Number(e.target.value) }))}
+                        value={edit?.mortalities ?? ""}
+                        onChange={e => setEdit(s => ({ ...(s as Row), mortalities: e.target.value === "" ? undefined : Number(e.target.value) }))}
                       />
-                    ) : (r.mortalities ?? 0)}
+                    ) : (Number(r.mortalities) || 0)}
                   </td>
                   <td className="py-2 pr-2">
                     {editingId === r.id ? (
@@ -198,10 +199,10 @@ export default function DailyLog() {
                         type="number" min={0}
                         className="border rounded px-2 py-1 placeholder-transparent"
                         placeholder="0"
-                        value={edit?.culls ?? 0}
-                        onChange={e => setEdit(s => ({ ...(s as Row), culls: Number(e.target.value) }))}
+                        value={edit?.culls ?? ""}
+                        onChange={e => setEdit(s => ({ ...(s as Row), culls: e.target.value === "" ? undefined : Number(e.target.value) }))}
                       />
-                    ) : (r.culls ?? 0)}
+                    ) : (Number(r.culls) || 0)}
                   </td>
                   <td className="py-2 pr-2">
                     {editingId === r.id ? (
