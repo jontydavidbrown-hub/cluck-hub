@@ -56,7 +56,7 @@ function LoginLightboxInline() {
   }
 
   async function doSignup() {
-    if (!emailOk || !passOk) return showError("Email and password (6+ chars) required");
+    if (!emailOk || !passOk) return showError("Email and password (6+ chars) required", !emailOk ? "email" : "password");
     setBusy(true); setError(null);
     try {
       await signup(email, password);
@@ -197,9 +197,106 @@ function NavItem({ to, children }: { to: string; children: any }) {
   );
 }
 
+/** Mobile drawer navigation */
+function MobileDrawer({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  // prevent body scroll when open
+  useEffect(() => {
+    try {
+      if (open) {
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        return () => { document.body.style.overflow = prev; };
+      }
+    } catch {}
+  }, [open]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    if (open) window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  const links = [
+    { to: "/", label: "Dashboard" },
+    { to: "/daily", label: "Daily Log" },
+    { to: "/weights", label: "Weights" },
+    { to: "/feed", label: "Feed Silos" },
+    { to: "/water", label: "Water" },
+    { to: "/reminders", label: "Reminders" },
+    { to: "/setup", label: "Setup" },
+    { to: "/analytics", label: "Analytics" },
+    { to: "/members", label: "Members" },
+    { to: "/user", label: "User" },
+  ];
+
+  return (
+    <>
+      {/* overlay */}
+      <div
+        className={[
+          "fixed inset-0 z-[8000] bg-black/30 backdrop-blur-sm transition-opacity md:hidden",
+          open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
+        ].join(" ")}
+        onClick={onClose}
+        aria-hidden
+      />
+      {/* panel */}
+      <aside
+        className={[
+          "fixed top-0 left-0 z-[8050] h-full w-72 bg-white shadow-xl md:hidden transition-transform",
+          open ? "translate-x-0" : "-translate-x-full",
+        ].join(" ")}
+        role="dialog"
+        aria-label="Mobile navigation"
+      >
+        <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200">
+          <div className="flex items-center gap-2">
+            <div className="size-7 rounded-lg bg-gradient-to-br from-emerald-400 to-lime-500" />
+            <span className="font-semibold">Cluck Hub</span>
+          </div>
+          <button
+            className="rounded-lg p-2 hover:bg-slate-100"
+            aria-label="Close menu"
+            onClick={onClose}
+          >
+            ✕
+          </button>
+        </div>
+        <nav className="p-2">
+          {links.map((l) => (
+            <NavLink
+              key={l.to}
+              to={l.to}
+              className={({ isActive }) =>
+                [
+                  "block px-3 py-2 rounded-lg",
+                  "hover:bg-slate-100 transition",
+                  isActive ? "bg-slate-100 font-medium" : "text-slate-700",
+                ].join(" ")
+              }
+              onClick={onClose}
+            >
+              {l.label}
+            </NavLink>
+          ))}
+        </nav>
+      </aside>
+    </>
+  );
+}
+
 export default function App() {
   const location = useLocation();
   const routeKey = useMemo(() => location.pathname, [location.pathname]);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
     <div className="min-h-dvh bg-gradient-to-b from-slate-50 to-white relative">
@@ -213,7 +310,22 @@ export default function App() {
       <header className="sticky top-0 z-40 backdrop-blur supports-[backdrop-filter]:bg-white/60 bg-white/80 border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="h-16 flex items-center justify-between">
-            <Brand />
+            {/* Left: mobile burger + brand */}
+            <div className="flex items-center gap-2">
+              <button
+                className="md:hidden rounded-lg p-2 hover:bg-slate-100"
+                aria-label="Open menu"
+                onClick={() => setMobileOpen(true)}
+              >
+                {/* simple burger icon */}
+                <span className="block w-5 h-0.5 bg-slate-800 mb-1"></span>
+                <span className="block w-5 h-0.5 bg-slate-800 mb-1"></span>
+                <span className="block w-5 h-0.5 bg-slate-800"></span>
+              </button>
+              <Brand />
+            </div>
+
+            {/* Desktop nav */}
             <nav className="hidden md:flex items-center gap-1 text-sm">
               <NavItem to="/">Dashboard</NavItem>
               <NavItem to="/daily">Daily Log</NavItem>
@@ -226,6 +338,8 @@ export default function App() {
               <NavItem to="/members">Members</NavItem>
               <NavItem to="/user">User</NavItem>
             </nav>
+
+            {/* Right: farm selector */}
             <HeaderFarmSelector />
           </div>
         </div>
@@ -239,6 +353,9 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {/* Mobile drawer */}
+      <MobileDrawer open={mobileOpen} onClose={() => setMobileOpen(false)} />
 
       {/* Global login lightbox */}
       <LoginLightboxInline />
