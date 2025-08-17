@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useServerState } from "../lib/serverState";
+import { useCloudSlice } from "../lib/cloudSlice";
 import { downloadCsv } from "../lib/csv";
 import { pdfWaterLogs } from "../lib/pdfLogs";
 
@@ -11,7 +11,7 @@ function emptyRow(): WaterRow {
 }
 
 export default function Water() {
-  const [rows, setRows] = useServerState<WaterRow[]>("waterLogs", []);
+  const [rows, setRows] = useCloudSlice<WaterRow[]>("waterLogs", []);
   const [draft, setDraft] = useState<WaterRow>(emptyRow());
   const [editing, setEditing] = useState<WaterRow | null>(null);
 
