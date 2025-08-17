@@ -120,7 +120,7 @@ export default function Setup() {
             type="number"
             className="… placeholder-transparent"
             placeholder="0"
-            … />
+          />
            {
             const next = Math.max(1, Number(e.target.value || 1));
             setSettings({ ...settings, batchLengthDays: next });
