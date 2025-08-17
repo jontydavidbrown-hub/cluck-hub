@@ -137,7 +137,7 @@ function MobileDrawer({ open, onClose }: { open: boolean; onClose: () => void })
   }, [open, onClose]);
 
   const links = [
-    { to: "/", label: "Dashboard" }, { to: "/daily", label: "Daily Log" }, { to: "/weights", label: "Weights" },
+    { to: "/", label: "Dashboard" }, { to: "/morts", label: "Morts" }, { to: "/weights", label: "Weights" },
     { to: "/feed", label: "Feed Silos" }, { to: "/water", label: "Water" }, { to: "/reminders", label: "Reminders" },
     { to: "/setup", label: "Setup" }, { to: "/analytics", label: "Analytics" }, { to: "/Farms", label: "Farms" }, { to: "/user", label: "User" },
   ];
@@ -187,7 +187,7 @@ export default function App() {
               <Brand />
             </div>
             <nav className="hidden md:flex items-center gap-1 text-sm">
-              <NavItem to="/">Dashboard</NavItem><NavItem to="/daily">Daily Log</NavItem><NavItem to="/weights">Weights</NavItem>
+              <NavItem to="/">Dashboard</NavItem><NavItem to="/morts">Morts</NavItem><NavItem to="/weights">Weights</NavItem>
               <NavItem to="/feed">Feed Silos</NavItem><NavItem to="/water">Water</NavItem><NavItem to="/reminders">Reminders</NavItem>
               <NavItem to="/setup">Setup</NavItem><NavItem to="/analytics">Analytics</NavItem><NavItem to="/Farms">Farms</NavItem><NavItem to="/user">User</NavItem>
             </nav>
