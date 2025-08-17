@@ -8,29 +8,26 @@ type Shed = {
   id: string;
   name: string;
   placementDate?: string;      // YYYY-MM-DD
-  placementBirds?: number;
-  birdsPlaced?: number;        // mirrored by Setup for compatibility
+  placementBirds?: number;     // legacy
+  birdsPlaced?: number;        // current
 };
 
 type DailyLogRow = {
   id: string;
   date: string;                // YYYY-MM-DD
   shed?: string;
-  mortalities?: number;
-  culls?: number;
-  notes?: string;
+  mortalities?: number;        // morts + culls (from Morts page)
 };
 
 type Settings = {
   batchLengthDays?: number;
 };
 
-function daysBetweenUTC(yyyyMmDdA?: string, yyyyMmDdB?: string) {
-  if (!yyyyMmDdA || !yyyyMmDdB) return 0;
-  const a = new Date(yyyyMmDdA + "T00:00:00Z").getTime();
-  const b = new Date(yyyyMmDdB + "T00:00:00Z").getTime();
-  const diffMs = b - a;
-  return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+function daysBetweenUTC(a?: string, b?: string) {
+  if (!a || !b) return 0;
+  const A = new Date(a + "T00:00:00Z").getTime();
+  const B = new Date(b + "T00:00:00Z").getTime();
+  return Math.floor((B - A) / (1000 * 60 * 60 * 24));
 }
 
 export default function Dashboard() {
@@ -43,23 +40,33 @@ export default function Dashboard() {
   const today = new Date().toISOString().slice(0, 10);
   const batchLen = Math.max(1, Number(settings.batchLengthDays ?? 42));
 
-  const tiles = useMemo(() => {
+  const { tiles, totals } = useMemo(() => {
     const rows = dailyLog || [];
 
-    // Sum morts per shed
+    // Sum mortalities per shed
     const mortsByShed = new Map<string, number>();
+    let totalMortsAll = 0;
     for (const r of rows) {
       const key = (r.shed || "").trim();
       if (!key) continue;
-      mortsByShed.set(key, (mortsByShed.get(key) || 0) + (Number(r.mortalities) || 0));
+      const add = Number(r.mortalities) || 0;
+      totalMortsAll += add;
+      mortsByShed.set(key, (mortsByShed.get(key) || 0) + add);
     }
 
-    return (sheds || [])
+    let totalPlacedBirdsAll = 0;
+    let totalRemainingBirdsAll = 0;
+    let totalFeedKgTodayAll = 0;
+
+    const tiles = (sheds || [])
       .map((s) => {
         const shedName = s.name || "";
         const mortsTotal = mortsByShed.get(shedName) || 0;
 
-        // Progress %
+        const placed = Number(s.birdsPlaced ?? s.placementBirds) || 0;
+        totalPlacedBirdsAll += placed;
+
+        // progress & age
         let progressPct = 0;
         let ageDays = 0;
         if (s.placementDate) {
@@ -67,11 +74,14 @@ export default function Dashboard() {
           progressPct = Math.min(100, Math.max(0, Math.round((ageDays / batchLen) * 100)));
         }
 
-        const placed = Number(s.birdsPlaced ?? s.placementBirds) || 0;
         const liveBirds = Math.max(0, placed - mortsTotal);
+        totalRemainingBirdsAll += liveBirds;
 
-        // Ross 308 estimate for today's feed (kg/day)
-        const feedKgToday = s.placementDate ? estimateShedFeedKgToday(ageDays, liveBirds) : 0;
+        // estimate feed for this shed for "today"
+        const feedKgToday = s.placementDate
+          ? estimateShedFeedKgToday(ageDays, liveBirds)
+          : 0;
+        totalFeedKgTodayAll += feedKgToday;
 
         return {
           id: s.id,
@@ -79,12 +89,21 @@ export default function Dashboard() {
           placementDate: s.placementDate || "",
           birdsPlaced: placed || undefined,
           progressPct,
-          mortsTotal,
-          feedKgToday,                // kg/day
           ageDays: s.placementDate ? ageDays : undefined,
+          mortsTotal,
+          feedKgToday, // kg/day
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
+
+    const totals = {
+      totalPlacedBirdsAll,
+      totalRemainingBirdsAll,
+      totalMortsAll,
+      totalFeedKgTodayAll, // kg/day
+    };
+
+    return { tiles, totals };
   }, [sheds, dailyLog, batchLen, today]);
 
   function goAddWeights(name: string) {
@@ -100,6 +119,38 @@ export default function Dashboard() {
   return (
     <div className="p-4 space-y-6">
       <h1 className="text-2xl font-semibold">Dashboard</h1>
+
+      {/* Totals bar */}
+      <div className="grid sm:grid-cols-4 gap-4">
+        <div className="rounded border p-4 bg-white">
+          <div className="text-xs text-slate-500">Total Placed Birds</div>
+          <div className="text-2xl font-semibold">
+            {totals.totalPlacedBirdsAll.toLocaleString()}
+          </div>
+        </div>
+        <div className="rounded border p-4 bg-white">
+          <div className="text-xs text-slate-500">Total Remaining Birds</div>
+          <div className="text-2xl font-semibold">
+            {totals.totalRemainingBirdsAll.toLocaleString()}
+          </div>
+        </div>
+        <div className="rounded border p-4 bg-white">
+          <div className="text-xs text-slate-500">Total Morts</div>
+          <div className="text-2xl font-semibold">
+            {totals.totalMortsAll.toLocaleString()}
+          </div>
+        </div>
+        <div className="rounded border p-4 bg-white">
+          <div className="text-xs text-slate-500">Total Est. Feed Consumption</div>
+          <div className="text-2xl font-semibold">
+            {(totals.totalFeedKgTodayAll / 1000).toLocaleString(undefined, {
+              minimumFractionDigits: 1,
+              maximumFractionDigits: 1,
+            })}{" "}
+            t
+          </div>
+        </div>
+      </div>
 
       {tiles.length === 0 ? (
         <div className="card p-6 text-slate-600">
@@ -127,9 +178,8 @@ export default function Dashboard() {
                 Batch progress: <span className="font-medium">{t.progressPct}%</span>
               </div>
 
-              {/* Boxes — same styling, new ones added */}
+              {/* Boxes inside shed tile */}
               <div className="grid grid-cols-2 gap-3 text-sm">
-                {/* 1) Day Age (first) */}
                 <div className="rounded border p-2">
                   <div className="text-xs text-slate-500">Day Age</div>
                   <div className="text-lg font-semibold">
@@ -137,19 +187,16 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* 2) Birds placed (unchanged) */}
                 <div className="rounded border p-2">
                   <div className="text-xs text-slate-500">Birds placed</div>
                   <div className="text-lg font-semibold">{t.birdsPlaced ?? "—"}</div>
                 </div>
 
-                {/* 3) Morts (total) (unchanged) */}
                 <div className="rounded border p-2">
                   <div className="text-xs text-slate-500">Morts (total)</div>
                   <div className="text-lg font-semibold">{t.mortsTotal}</div>
                 </div>
 
-                {/* 4) Est. feed today in tonnes (one decimal) */}
                 <div className="rounded border p-2">
                   <div className="text-xs text-slate-500">Est. feed today</div>
                   <div className="text-lg font-semibold">
