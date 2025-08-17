@@ -18,11 +18,11 @@ export default function App() {
 
   return (
     <div className="min-h-dvh flex flex-col">
-      {/* Header */}
-      <header className="sticky top-0 z-40 bg-white/80 backdrop-blur border-b">
+      {/* Header: solid background, no blur/transparency */}
+      <header className="sticky top-0 z-40 bg-white border-b">
         <div className="mx-auto max-w-6xl px-4">
           <div className="h-14 flex items-center justify-between gap-4">
-            {/* Left: brand */}
+            {/* Left: brand + hamburger */}
             <div className="flex items-center gap-3">
               <button
                 className="sm:hidden inline-flex items-center justify-center rounded p-2 hover:bg-black/5"
@@ -40,7 +40,7 @@ export default function App() {
               </Link>
             </div>
 
-            {/* Center / Right: nav */}
+            {/* Desktop nav */}
             <nav className="hidden sm:flex items-center gap-2">
               <TopNavLink to="/">Dashboard</TopNavLink>
               <TopNavLink to="/setup">Setup</TopNavLink>
@@ -79,7 +79,7 @@ export default function App() {
                 <MobileLink to="/setup">Setup</MobileLink>
                 <MobileLink to="/farms">Farms</MobileLink>
 
-                {/* Data section on mobile (expanded list) */}
+                {/* Data section on mobile (list) */}
                 <div className="mt-2">
                   <div className="px-2 py-1 text-xs uppercase tracking-wide text-slate-500">Data</div>
                   <div className="mt-1 flex flex-col">
