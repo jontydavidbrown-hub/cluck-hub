@@ -1,9 +1,9 @@
 import { useEffect } from "react";
-import { useServerState } from "../lib/serverState";
+import { useCloudSlice } from "../lib/cloudSlicve";
 import { me, logout } from "../lib/session";
 
 export default function User() {
-  const { state: user, setState: setUser } = useServerState<{ email: string } | null>("user", null);
+  const { state: user, setState: setUser } = useCloudSlice<{ email: string } | null>("user", null);
 
   // ✅ Run once on mount only (prevents loops)
   useEffect(() => {
