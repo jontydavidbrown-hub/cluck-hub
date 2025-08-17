@@ -3,14 +3,13 @@ import { useCloudSlice } from "../lib/cloudSlice";
 
 type Settings = {
   batchLengthDays?: number;
-  // (anything else you already store is preserved)
 };
 
 type Shed = {
   id: string;
   name: string;
-  placementDate?: string;     // YYYY-MM-DD
-  placementBirds?: number;    // number, optional so placeholder can show
+  placementDate?: string;   // YYYY-MM-DD
+  placementBirds?: number;  // optional so placeholder can show
 };
 
 function newId() {
@@ -18,15 +17,13 @@ function newId() {
 }
 
 export default function Setup() {
-  // Persisted settings (unchanged key)
+  // Persisted settings + sheds
   const [settings, setSettings] = useCloudSlice<Settings>("settings", {});
-  // Persisted sheds list (key matches typical usage; change if your repo uses a different one)
   const [sheds, setSheds] = useCloudSlice<Shed[]>("sheds", []);
 
-  // --- Batch length: allow clearing while typing ---
+  // --- Batch length uses a local draft so you can clear / retype easily ---
   const [batchDraft, setBatchDraft] = useState<string>("");
 
-  // Keep local draft in sync with persisted settings
   useEffect(() => {
     const v = settings.batchLengthDays;
     setBatchDraft(v == null ? "" : String(v));
@@ -35,7 +32,6 @@ export default function Setup() {
   function commitBatchLength() {
     const raw = batchDraft.trim();
     if (raw === "") {
-      // Keep behavior consistent: if empty, fall back to 1 (minimum) on commit
       setSettings((prev) => ({ ...prev, batchLengthDays: 1 }));
       setBatchDraft("1");
       return;
@@ -67,7 +63,6 @@ export default function Setup() {
     setSheds((prev) => prev.filter((s) => s.id !== id));
   }
 
-  // Local input for adding a shed
   const [newShedName, setNewShedName] = useState("");
 
   return (
@@ -85,13 +80,13 @@ export default function Setup() {
               min={1}
               placeholder="0"
               className="w-full border rounded px-2 py-1 placeholder-transparent"
-              value={batchDraft}                         // <-- can be empty while typing
+              value={batchDraft}
               onChange={(e) => setBatchDraft(e.target.value)}
               onBlur={commitBatchLength}
               onKeyDown={(e) => { if (e.key === "Enter") commitBatchLength(); }}
             />
             <p className="mt-1 text-xs text-slate-500">
-              You can clear the field to edit; it will commit a minimum of 1 on blur/enter.
+              Clear to edit; commits a minimum of 1 on blur/enter.
             </p>
           </div>
         </div>
@@ -152,7 +147,7 @@ export default function Setup() {
                       min={0}
                       placeholder="0"
                       className="border rounded px-2 py-1 placeholder-transparent"
-                      value={s.placementBirds ?? ""}  {/* transparent, type-over */}
+                      value={s.placementBirds ?? ""}
                       onChange={(e) =>
                         updateShed(
                           s.id,
@@ -181,7 +176,7 @@ export default function Setup() {
         </div>
 
         <p className="text-xs text-slate-600">
-          Use placement date and birds to prefill other parts of the app. Numbers use transparent placeholders so you can type over them.
+          Placement date and birds feed into other parts of the app. Numbers use transparent placeholders so you can type over them.
         </p>
       </div>
     </div>
