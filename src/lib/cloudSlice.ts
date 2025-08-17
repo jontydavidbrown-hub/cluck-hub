@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useContext } from "react";
 import { useServerState } from "./serverState";
-import { useFarm } from "./FarmContext";
+import { FarmCtx } from "./FarmContext";
 
 function jsonEqual(a: any, b: any) {
   try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
@@ -27,7 +27,10 @@ export function useCloudSlice<T>(
   opts?: { pollMs?: number; scope?: "farm" | "global" | string }
 ) {
   const { state: local, setState: setLocal } = useServerState<T>(key, initial);
-  const { farmId } = useFarm() as any;
+
+  // Read farmId if a provider exists; otherwise undefined (no throw)
+  const farmCtx = useContext(FarmCtx);
+  const farmId = farmCtx?.farmId ?? null;
 
   const loadedOnce = useRef(false);
   const lastPushed = useRef<string>("");
@@ -64,7 +67,7 @@ export function useCloudSlice<T>(
     }
   }
 
-  // Load from cloud once on mount / when key or scope changes (first run guarded)
+  // Load from cloud once on mount / when key or scope changes
   useEffect(() => {
     if (loadedOnce.current) return;
     loadedOnce.current = true;
