@@ -8,8 +8,8 @@ type SiloRow = {
   id: string;
   name: string;
   type: FeedType;
-  capacityT: number;
-  levelT: number;
+  capacityT?: number;   // optional so placeholder can show
+  levelT?: number;      // optional so placeholder can show
   notes?: string;
 };
 
@@ -17,11 +17,10 @@ function newId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 function emptyRow(): SiloRow {
-  return { id: newId(), name: "", type: "Starter", capacityT: 0, levelT: 0, notes: "" };
+  return { id: newId(), name: "", type: "Starter", capacityT: undefined, levelT: undefined, notes: "" };
 }
 
 export default function Feed() {
-  // If your existing slice key differs, change "feedSilos" to match it.
   const [rows, setRows] = useCloudSlice<SiloRow[]>("feedSilos", []);
   const [draft, setDraft] = useState<SiloRow>(emptyRow());
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -48,8 +47,8 @@ export default function Feed() {
     const cleaned: SiloRow = {
       ...draft,
       id: draft.id || newId(),
-      capacityT: Math.max(0, clampNum(draft.capacityT)),
-      levelT: Math.max(0, Math.min(clampNum(draft.levelT), clampNum(draft.capacityT))),
+      capacityT: clampNum(draft.capacityT ?? 0),
+      levelT: Math.max(0, Math.min(clampNum(draft.levelT ?? 0), clampNum(draft.capacityT ?? 0))),
       type: FEED_TYPES.includes(draft.type) ? draft.type : "Starter",
     };
     setRows(prev => [...(prev || []), cleaned]);
@@ -66,8 +65,8 @@ export default function Feed() {
     const cleaned: SiloRow = {
       ...edit,
       name: (edit.name || "").trim(),
-      capacityT: Math.max(0, clampNum(edit.capacityT)),
-      levelT: Math.max(0, Math.min(clampNum(edit.levelT), clampNum(edit.capacityT))),
+      capacityT: clampNum(edit.capacityT ?? 0),
+      levelT: Math.max(0, Math.min(clampNum(edit.levelT ?? 0), clampNum(edit.capacityT ?? 0))),
       type: FEED_TYPES.includes(edit.type) ? edit.type : "Starter",
     };
     if (!cleaned.name) return;
@@ -121,8 +120,8 @@ export default function Feed() {
               type="number" min={0} step="0.01"
               className="w-full border rounded px-2 py-1 placeholder-transparent"
               placeholder="0"
-              value={draft.capacityT}
-              onChange={e => setDraft({ ...draft, capacityT: clampNum(e.target.value) })}
+              value={draft.capacityT ?? ""}
+              onChange={e => setDraft({ ...draft, capacityT: e.target.value === "" ? undefined : clampNum(e.target.value) })}
             />
           </div>
 
@@ -132,8 +131,8 @@ export default function Feed() {
               type="number" min={0} step="0.01"
               className="w-full border rounded px-2 py-1 placeholder-transparent"
               placeholder="0"
-              value={draft.levelT}
-              onChange={e => setDraft({ ...draft, levelT: clampNum(e.target.value) })}
+              value={draft.levelT ?? ""}
+              onChange={e => setDraft({ ...draft, levelT: e.target.value === "" ? undefined : clampNum(e.target.value) })}
             />
           </div>
 
@@ -199,22 +198,22 @@ export default function Feed() {
                         type="number" min={0} step="0.01"
                         className="border rounded px-2 py-1 placeholder-transparent"
                         placeholder="0"
-                        value={edit?.capacityT ?? 0}
-                        onChange={e => setEdit(s => ({ ...(s as SiloRow), capacityT: clampNum(e.target.value) }))}
+                        value={edit?.capacityT ?? ""}
+                        onChange={e => setEdit(s => ({ ...(s as SiloRow), capacityT: e.target.value === "" ? undefined : clampNum(e.target.value) }))}
                       />
-                    ) : r.capacityT.toFixed(2)}
+                    ) : (r.capacityT != null ? r.capacityT.toFixed(2) : "—")}
                   </td>
 
                   <td className="py-2 pr-2">
                     {editingId === r.id ? (
                       <input
-                        type="number" min={0} step="0.01"
+                        type="number" min={0} step={0.01}
                         className="border rounded px-2 py-1 placeholder-transparent"
                         placeholder="0"
-                        value={edit?.levelT ?? 0}
-                        onChange={e => setEdit(s => ({ ...(s as SiloRow), levelT: clampNum(e.target.value) }))}
+                        value={edit?.levelT ?? ""}
+                        onChange={e => setEdit(s => ({ ...(s as SiloRow), levelT: e.target.value === "" ? undefined : clampNum(e.target.value) }))}
                       />
-                    ) : r.levelT.toFixed(2)}
+                    ) : (r.levelT != null ? r.levelT.toFixed(2) : "—")}
                   </td>
 
                   <td className="py-2 pr-2">
