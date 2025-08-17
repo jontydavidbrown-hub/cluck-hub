@@ -8,8 +8,9 @@ type Settings = {
 type Shed = {
   id: string;
   name: string;
-  placementDate?: string;   // YYYY-MM-DD
-  placementBirds?: number;  // optional so placeholder can show
+  placementDate?: string;      // YYYY-MM-DD
+  placementBirds?: number;     // we'll also mirror to birdsPlaced for dashboard compatibility
+  birdsPlaced?: number;        // some dashboards may read this name
 };
 
 function newId() {
@@ -17,15 +18,18 @@ function newId() {
 }
 
 export default function Setup() {
-  // Persisted settings + sheds
+  // Persisted slices (keys unchanged)
   const [settings, setSettings] = useCloudSlice<Settings>("settings", {});
   const [sheds, setSheds] = useCloudSlice<Shed[]>("sheds", []);
 
   // Batch length uses a local draft so you can clear/retype easily
   const [batchDraft, setBatchDraft] = useState<string>("");
 
-  // UI save indicator
+  // “Saved” flash
   const [justSaved, setJustSaved] = useState(false);
+
+  // For focusing the newly added shed row
+  const [focusId, setFocusId] = useState<string | null>(null);
 
   useEffect(() => {
     const v = settings.batchLengthDays;
@@ -35,7 +39,6 @@ export default function Setup() {
   function commitBatchLength() {
     const raw = batchDraft.trim();
     if (raw === "") {
-      // Commit a minimum of 1 on empty
       setSettings((prev) => ({ ...prev, batchLengthDays: 1 }));
       setBatchDraft("1");
       return;
@@ -45,34 +48,49 @@ export default function Setup() {
     setBatchDraft(String(n));
   }
 
+  // Normalize shed bird fields so both names are present
+  function normalizeShedBirds(s: Shed): Shed {
+    const v =
+      s.placementBirds != null ? Number(s.placementBirds) :
+      s.birdsPlaced != null ? Number(s.birdsPlaced) :
+      undefined;
+    return { ...s, placementBirds: v, birdsPlaced: v };
+  }
+
   async function handleSave() {
     // Ensure any draft is committed
     commitBatchLength();
 
-    // Force a push even if arrays/objects didn't structurally change
-    setSettings((prev) => ({ ...prev }));
-    setSheds((prev) => ([...(prev || [])]));
+    // Normalize & force push sheds
+    setSheds((prev) => {
+      const list = (prev || []).map(normalizeShedBirds);
+      return [...list]; // new array to guarantee a write
+    });
 
-    // Little “Saved” feedback
+    // Nudge settings too (in case unchanged object)
+    setSettings((prev) => ({ ...prev }));
+
     setJustSaved(true);
     window.setTimeout(() => setJustSaved(false), 1500);
   }
 
-  // Sheds helpers
+  // Sorted sheds for stable UI
   const shedsSorted = useMemo(
     () => [...(sheds || [])].sort((a, b) => (a.name || "").localeCompare(b.name || "")),
     [sheds]
   );
 
-  function addShed(nameRaw: string) {
-    const name = nameRaw.trim();
-    if (!name) return;
-    const shed: Shed = { id: newId(), name, placementDate: "", placementBirds: undefined };
+  function addBlankShedRow() {
+    const id = newId();
+    const shed: Shed = { id, name: "", placementDate: "", placementBirds: undefined, birdsPlaced: undefined };
     setSheds((prev) => [...(prev || []), shed]);
+    setFocusId(id);
   }
 
   function updateShed(id: string, patch: Partial<Shed>) {
-    setSheds((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    setSheds((prev) =>
+      prev.map((s) => (s.id === id ? normalizeShedBirds({ ...s, ...patch }) : s))
+    );
   }
 
   function removeShed(id: string) {
@@ -80,18 +98,13 @@ export default function Setup() {
     setSheds((prev) => prev.filter((s) => s.id !== id));
   }
 
-  const [newShedName, setNewShedName] = useState("");
-
   return (
     <div className="p-4 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Setup</h1>
         <div className="flex items-center gap-2">
           {justSaved && <span className="text-sm text-green-600">Saved ✓</span>}
-          <button
-            className="rounded bg-slate-900 text-white px-4 py-2"
-            onClick={handleSave}
-          >
+          <button className="rounded bg-slate-900 text-white px-4 py-2" onClick={handleSave}>
             Save
           </button>
         </div>
@@ -122,19 +135,11 @@ export default function Setup() {
 
       {/* Sheds configuration */}
       <div className="card p-4 space-y-4">
-        <div className="font-medium">Sheds</div>
-
-        {/* Add shed */}
-        <div className="flex flex-col sm:flex-row gap-2">
-          <input
-            className="flex-1 border rounded px-3 py-2"
-            placeholder="New shed name (e.g., Shed 1)"
-            value={newShedName}
-            onChange={(e) => setNewShedName(e.target.value)}
-          />
-        <button
+        <div className="flex items-center justify-between">
+          <div className="font-medium">Sheds</div>
+          <button
             className="rounded bg-slate-900 text-white px-4 py-2"
-            onClick={() => { addShed(newShedName); setNewShedName(""); }}
+            onClick={addBlankShedRow}
           >
             Add Shed
           </button>
@@ -158,6 +163,7 @@ export default function Setup() {
                     <input
                       className="border rounded px-2 py-1"
                       value={s.name}
+                      autoFocus={s.id === focusId}
                       onChange={(e) => updateShed(s.id, { name: e.target.value })}
                     />
                   </td>
@@ -175,13 +181,12 @@ export default function Setup() {
                       min={0}
                       placeholder="0"
                       className="border rounded px-2 py-1 placeholder-transparent"
-                      value={s.placementBirds ?? ""}
-                      onChange={(e) =>
-                        updateShed(
-                          s.id,
-                          { placementBirds: e.target.value === "" ? undefined : Number(e.target.value) }
-                        )
-                      }
+                      value={s.placementBirds ?? s.birdsPlaced ?? ""}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        const v = raw === "" ? undefined : Number(raw);
+                        updateShed(s.id, { placementBirds: v, birdsPlaced: v });
+                      }}
                     />
                   </td>
                   <td className="py-2 pr-2">
@@ -204,7 +209,7 @@ export default function Setup() {
         </div>
 
         <p className="text-xs text-slate-600">
-          Placement date and birds feed into other parts of the app. Numbers use transparent placeholders so you can type over them.
+          Numbers use transparent placeholders so you can type over them. We sync both “placementBirds” and “birdsPlaced” for dashboard compatibility.
         </p>
       </div>
     </div>
