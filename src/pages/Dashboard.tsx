@@ -1,111 +1,85 @@
-import { Link } from "react-router-dom";
 import { useMemo } from "react";
 import { useCloudSlice } from "../lib/cloudSlice";
-import { DEFAULT_SETTINGS, normalizeSettings } from "../lib/defaults";
 
 type Shed = {
   id: string;
   name: string;
-  placedDate?: string | null;
-  initialCount?: number | null;
+  placementDate?: string;
+  placementBirds?: number;
+  birdsPlaced?: number;
 };
-type Settings = { batchLengthDays: number };
-
-function daysBetween(isoStart: string, isoEnd: string) {
-  // Compare by local date (strip time to avoid TZ off-by-ones)
-  const a = new Date(isoStart + "T00:00:00");
-  const b = new Date(isoEnd + "T00:00:00");
-  const ms = b.getTime() - a.getTime();
-  return Math.max(0, Math.floor(ms / 86400000));
-}
 
 export default function Dashboard() {
-  const { state: shedsRaw } = useCloudSlice<any>("sheds", []);
-  // ✅ Always load settings with defaults and normalize before use
-  const { state: settingsRaw } = useCloudSlice<Settings>("settings", DEFAULT_SETTINGS);
-  const settings = normalizeSettings(settingsRaw);
+  // Read the same slice Setup writes to
+  const [sheds] = useCloudSlice<Shed[]>("sheds", []);
 
-  const sheds: Shed[] = useMemo(() => {
-    if (!Array.isArray(shedsRaw)) return [];
-    return shedsRaw.map((x: any) =>
-      typeof x === "string"
-        ? { id: x, name: x, placedDate: null, initialCount: null }
-        : (x as Shed)
-    );
-  }, [shedsRaw]);
+  const stats = useMemo(() => {
+    const list = sheds || [];
+    const count = list.length;
 
-  const batchDays = Math.max(1, Number(settings.batchLengthDays)); // never undefined now
-  const today = new Date();
-  const todayISO = today.toISOString().slice(0, 10);
+    const birdsTotal = list.reduce((n, s) => {
+      const v = Number(s.birdsPlaced ?? s.placementBirds) || 0;
+      return n + v;
+    }, 0);
+
+    // Most recent non-empty placement date
+    const dates = list
+      .map((s) => s.placementDate || "")
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    const latestPlacement = dates.length ? dates[dates.length - 1] : null;
+
+    return { count, birdsTotal, latestPlacement };
+  }, [sheds]);
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 space-y-6">
       <h1 className="text-2xl font-semibold">Dashboard</h1>
 
-      {!sheds.length && (
-        <div className="p-4 border rounded-xl bg-white">
-          <p className="text-slate-600">
-            No sheds yet. Add them in <Link className="underline" to="/setup">Setup</Link> to see tiles here.
-          </p>
+      {/* Summary tiles */}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="card p-4">
+          <div className="text-xs text-slate-500">Sheds</div>
+          <div className="text-2xl font-semibold">{stats.count}</div>
         </div>
-      )}
+        <div className="card p-4">
+          <div className="text-xs text-slate-500">Birds placed (total)</div>
+          <div className="text-2xl font-semibold">{stats.birdsTotal}</div>
+        </div>
+        <div className="card p-4">
+          <div className="text-xs text-slate-500">Latest placement date</div>
+          <div className="text-2xl font-semibold">{stats.latestPlacement ?? "—"}</div>
+        </div>
+      </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {sheds.map((s) => {
-          const placed = s.placedDate || todayISO; // if not set, treat as today (progress 0)
-          const day = daysBetween(placed, todayISO) + 1; // show Day 1 on placement day
-          const pct = Math.max(0, Math.min(100, Math.round((day / batchDays) * 100)));
-          const daysLeft = Math.max(0, batchDays - day);
-
-          return (
-            <div key={s.id} className="bg-white border rounded-xl p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="font-semibold">{s.name}</div>
-                  <div className="text-xs text-slate-500">
-                    Day {Math.min(day, batchDays)} of {batchDays}
-                    {s.initialCount != null && <> · Placed: {s.initialCount.toLocaleString()}</>}
-                  </div>
-                </div>
-                <div className="text-xs text-slate-500">{daysLeft} days left</div>
-              </div>
-
-              {/* Progress bar */}
-              <div className="mt-3">
-                <div className="h-2 bg-slate-200 rounded">
-                  <div
-                    className="h-2 bg-emerald-500 rounded transition-[width] duration-300"
-                    style={{ width: `${pct}%` }}
-                    aria-label={`Batch progress ${pct}%`}
-                  />
-                </div>
-                <div className="mt-1 text-xs text-slate-500">{pct}%</div>
-              </div>
-
-              {/* Actions */}
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Link
-                  to={`/weights?shed=${encodeURIComponent(s.name)}`}
-                  className="px-3 py-2 rounded-lg bg-slate-900 text-white text-sm"
-                >
-                  Add weight
-                </Link>
-                <Link
-                  to={`/daily-log?shed=${encodeURIComponent(s.name)}`}
-                  className="px-3 py-2 rounded-lg border text-sm"
-                >
-                  Add daily log
-                </Link>
-                <Link
-                  to={`/feed-silos?shed=${encodeURIComponent(s.name)}`}
-                  className="px-3 py-2 rounded-lg border text-sm"
-                >
-                  Add feed
-                </Link>
-              </div>
-            </div>
-          );
-        })}
+      {/* Sheds list */}
+      <div className="card p-4">
+        <div className="font-medium mb-3">Sheds</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="py-2 pr-2">Shed</th>
+                <th className="py-2 pr-2">Placement date</th>
+                <th className="py-2 pr-2">Placement birds</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(sheds || []).map((s) => (
+                <tr key={s.id} className="border-b">
+                  <td className="py-2 pr-2">{s.name || "—"}</td>
+                  <td className="py-2 pr-2">{s.placementDate || "—"}</td>
+                  <td className="py-2 pr-2">{s.birdsPlaced ?? s.placementBirds ?? "—"}</td>
+                </tr>
+              ))}
+              {(!sheds || sheds.length === 0) && (
+                <tr>
+                  <td className="py-6 text-gray-500" colSpan={3}>No sheds yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
