@@ -1,12 +1,12 @@
 // src/App.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 
 function cx(...classes: (string | false | null | undefined)[]) {
   return classes.filter(Boolean).join(" ");
 }
 
-// Reusable top-nav item with animated underline (matches your original vibe)
+// Top nav item with animated underline + hover/press accents
 function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
   return (
     <NavLink
@@ -30,7 +30,9 @@ function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
 
 export default function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [dataOpen, setDataOpen] = useState(false); // desktop dropdown
+  const [dataOpen, setDataOpen] = useState(false); // dropdown (desktop)
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const location = useLocation();
 
   // Close menus on route change
@@ -39,28 +41,38 @@ export default function App() {
     setDataOpen(false);
   }, [location.pathname, location.search]);
 
-  // Close Data dropdown on outside click / ESC
+  // Close dropdown on outside click / ESC
   useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!dataOpen) return;
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) return;
+      setDataOpen(false);
+    }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setDataOpen(false);
     }
+    document.addEventListener("click", onDocClick);
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
+    return () => {
+      document.removeEventListener("click", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [dataOpen]);
 
   return (
     <div className="min-h-dvh flex flex-col relative">
-      {/* Gradient background behind app (restores the colored backdrop) */}
+      {/* ✨ Soft gradient backdrop (as before) */}
       <div
         aria-hidden
         className="pointer-events-none fixed inset-0 -z-10 bg-gradient-to-br from-indigo-100 via-white to-emerald-100"
       />
 
-      {/* Header: translucent + blur with subtle border/shadow */}
+      {/* Header: translucent + blur + subtle border/shadow (as before) */}
       <header className="sticky top-0 z-40 bg-white/70 backdrop-blur supports-[backdrop-filter]:bg-white/70 border-b border-black/10 shadow-sm">
         <div className="mx-auto max-w-6xl px-4">
           <div className="h-14 flex items-center justify-between gap-4">
-            {/* Left: brand + hamburger */}
+            {/* Brand + hamburger */}
             <div className="flex items-center gap-3">
               <button
                 className="sm:hidden inline-flex items-center justify-center rounded p-2 transition hover:bg-black/5 active:scale-[0.98]"
@@ -86,6 +98,7 @@ export default function App() {
               {/* Data dropdown (Morts, Weights, Feed Silos, Water, Reminders) */}
               <div className="relative">
                 <button
+                  ref={btnRef}
                   type="button"
                   className={cx(
                     "group relative px-3 py-2 rounded transition-all",
@@ -106,20 +119,20 @@ export default function App() {
 
                 {dataOpen && (
                   <div
+                    ref={menuRef}
                     role="menu"
                     className="absolute right-0 mt-2 w-48 rounded-md border bg-white shadow-lg p-1 z-50"
-                    onMouseLeave={() => setDataOpen(false)}
                   >
-                    <MenuItem to="/morts" onClick={() => setDataOpen(false)}>Morts</MenuItem>
-                    <MenuItem to="/weights" onClick={() => setDataOpen(false)}>Weights</MenuItem>
-                    <MenuItem to="/feed" onClick={() => setDataOpen(false)}>Feed Silos</MenuItem>
-                    <MenuItem to="/water" onClick={() => setDataOpen(false)}>Water</MenuItem>
-                    <MenuItem to="/reminders" onClick={() => setDataOpen(false)}>Reminders</MenuItem>
+                    <MenuItem to="/morts">Morts</MenuItem>
+                    <MenuItem to="/weights">Weights</MenuItem>
+                    <MenuItem to="/feed">Feed Silos</MenuItem>
+                    <MenuItem to="/water">Water</MenuItem>
+                    <MenuItem to="/reminders">Reminders</MenuItem>
                   </div>
                 )}
               </div>
 
-              {/* User icon */}
+              {/* User icon (replaces text “User”) */}
               <NavLink
                 to="/user"
                 className={({ isActive }) =>
@@ -141,7 +154,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Mobile drawer */}
+        {/* Mobile drawer (with same vibe) */}
         {mobileOpen && (
           <div className="sm:hidden border-t bg-white/90 backdrop-blur animate-fade-slide">
             <div className="mx-auto max-w-6xl px-4 py-2">
@@ -184,19 +197,10 @@ export default function App() {
   );
 }
 
-function MenuItem({
-  to,
-  onClick,
-  children,
-}: {
-  to: string;
-  onClick?: () => void;
-  children: React.ReactNode;
-}) {
+function MenuItem({ to, children }: { to: string; children: React.ReactNode }) {
   return (
     <NavLink
       to={to}
-      onClick={onClick}
       className={({ isActive }) =>
         cx(
           "block rounded px-3 py-2 text-sm transition",
