@@ -3,6 +3,8 @@ import { useMemo, useEffect, useRef, useState } from "react";
 import { useFarm } from "./lib/FarmContext";
 import { useServerState } from "./lib/serverState";
 import { login, signup, me } from "./lib/session";
+import DataMenu from "./components/DataMenu";
+import { NavLink } from "react-router-dom";
 
 function LoginLightboxInline() {
   const { state: user, setState: setUser } = useServerState<{ email: string } | null>("user", null);
