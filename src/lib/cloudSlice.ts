@@ -1,7 +1,6 @@
-/* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useRef } from "react";
 import { useServerState } from "./serverState";
-import { useFarm } from "./FarmContext";
+import { useFarm } from "../FarmContext";
 
 function jsonEqual(a: any, b: any) {
   try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
@@ -12,14 +11,17 @@ function debounce<T extends (...args: any[]) => any>(fn: T, ms: number) {
 
 /**
  * useCloudSlice(key, initial, opts?)
- * - reads initial value from Netlify Blobs on mount (scoped by farm)
- * - pushes changes to Blobs (debounced)
- * - pulls again on window focus / tab visibility regain
- * - optional background polling (default 30s)
- *
- * Works even if you're not signed in (silently falls back to local).
+ * - scope: "farm" (default) or "global" or a custom string scope
+ * - reads initial value from Netlify Blobs on mount
+ * - pushes changes (debounced)
+ * - pulls again on focus / visibility regain
+ * - optional polling (default 30s)
  */
-export function useCloudSlice<T>(key: string, initial: T, opts?: { pollMs?: number }) {
+export function useCloudSlice<T>(
+  key: string,
+  initial: T,
+  opts?: { pollMs?: number; scope?: "farm" | "global" | string }
+) {
   const { state: local, setState: setLocal } = useServerState<T>(key, initial);
   const { farmId } = useFarm() as any;
   const loadedOnce = useRef(false);
@@ -27,18 +29,23 @@ export function useCloudSlice<T>(key: string, initial: T, opts?: { pollMs?: numb
   const pulling = useRef<AbortController | null>(null);
   const pollMs = opts?.pollMs ?? 30000;
 
-  const isBrowser = typeof window !== "undefined" && typeof document !== "undefined";
-  const scopeKey = (scope: string, k: string) => `${scope}/${k}`;
-  const scoped = () => scopeKey(farmId || "default", key);
+  // determine scope prefix
+  const scopeTag =
+    opts?.scope === "global"
+      ? "user"
+      : opts?.scope
+      ? String(opts.scope)
+      : (farmId || "default");
+
+  const scopedKey = `${scopeTag}/${key}`;
 
   async function pullOnce() {
-    if (!isBrowser) return;
     try {
       const ctrl = new AbortController();
-      pulling.current?.abort(); // cancel any in-flight
+      pulling.current?.abort();
       pulling.current = ctrl;
 
-      const res = await fetch(`/.netlify/functions/data?key=${encodeURIComponent(scoped())}`, {
+      const res = await fetch(`/.netlify/functions/data?key=${encodeURIComponent(scopedKey)}`, {
         credentials: "include",
         signal: ctrl.signal,
       });
@@ -52,17 +59,16 @@ export function useCloudSlice<T>(key: string, initial: T, opts?: { pollMs?: numb
     }
   }
 
-  // Load from cloud once on mount
+  // Load from cloud once on mount or when key/scope changes
   useEffect(() => {
-    if (!isBrowser) return;
     if (loadedOnce.current) return;
     loadedOnce.current = true;
     pullOnce();
-  }, [key, farmId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, scopeTag]);
 
-  // Pull on focus / when tab becomes visible
+  // Pull on focus / visibility
   useEffect(() => {
-    if (!isBrowser) return;
     function onFocus() { pullOnce(); }
     function onVis() { if (document.visibilityState === "visible") pullOnce(); }
     window.addEventListener("focus", onFocus);
@@ -71,19 +77,17 @@ export function useCloudSlice<T>(key: string, initial: T, opts?: { pollMs?: numb
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [key, farmId]);
+  }, [key, scopeTag]);
 
-  // Optional background polling
+  // Optional polling
   useEffect(() => {
-    if (!isBrowser) return;
     if (!pollMs) return;
     const id = setInterval(pullOnce, pollMs);
     return () => clearInterval(id);
-  }, [pollMs, key, farmId]);
+  }, [pollMs, key, scopeTag]);
 
   const push = useRef(
     debounce(async (value: T, keyScoped: string) => {
-      if (!isBrowser) return;
       try {
         const body = JSON.stringify(value);
         if (lastPushed.current === body) return;
@@ -100,15 +104,10 @@ export function useCloudSlice<T>(key: string, initial: T, opts?: { pollMs?: numb
     }, 500)
   ).current;
 
-  // Push to cloud when the slice changes
+  // Push when slice changes
   useEffect(() => {
-    if (!isBrowser) return;
-    push(local, scoped());
-  }, [local, key, farmId, push]);
+    push(local, scopedKey);
+  }, [local, key, scopeTag, push]);
 
-  // Same tuple API as useServerState slice mode
   return [local, setLocal] as const;
 }
-
-// Also export default to tolerate `import useCloudSlice from "..."`
-export default useCloudSlice;
