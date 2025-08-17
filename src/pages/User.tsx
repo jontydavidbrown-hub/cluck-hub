@@ -3,20 +3,30 @@ import { useServerState } from "../lib/serverState";
 import { me, logout } from "../lib/session";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useFarm } from "../lib/FarmContext";
+import { useCloudSlice } from "../lib/cloudSlice";
 
 export default function User() {
   const { state: user, setState: setUser } =
     useServerState<{ email: string } | null>("user", null);
 
+  // Keep using your FarmContext for existing behavior (createFarm, etc.)
   const { farms = [], farmId, setFarmId, createFarm } = useFarm() as any;
+
+  // 🔁 New: global cloud-backed mirrors to ensure cross-device sync
+  const [globalFarms, setGlobalFarms] = useCloudSlice<any[]>("farms", [], { scope: "global" });
+  const [globalSelectedFarmId, setGlobalSelectedFarmId] =
+    useCloudSlice<string | null>("selectedFarmId", null, { scope: "global" });
 
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Prefer the global list for display/sync (fallback to context if empty)
+  const farmsForUI: any[] = (globalFarms && globalFarms.length > 0) ? globalFarms : (farms || []);
+
   // Keep local list stable by name
   const farmsSorted = useMemo(
-    () => [...(farms || [])].sort((a, b) => (a?.name || "").localeCompare(b?.name || "")),
-    [farms]
+    () => [...(farmsForUI || [])].sort((a, b) => (a?.name || "").localeCompare(b?.name || "")),
+    [farmsForUI]
   );
 
   // Sync user on mount once
@@ -57,14 +67,32 @@ export default function User() {
     const name = newName.trim();
     if (!name) return;
     try {
-      // createFarm may or may not return the id; call and then let the provider refresh its list
+      // Keep your existing behavior
       await createFarm?.(name);
+
+      // Nudge global list so it syncs across devices immediately.
+      // (If your provider updates the global "farms" itself, this is harmless.)
+      setGlobalFarms(prev => [...(prev || []), { id: Date.now().toString(36), name }]);
+
       setNewName("");
     } catch (e) {
-      // UI only; keep silent or toast if you have a toaster
       console.error("createFarm failed", e);
     }
   }
+
+  // 🔗 Keep selected farm in sync both ways (context ↔ global)
+  useEffect(() => {
+    if (farmId !== globalSelectedFarmId) {
+      // Prefer the explicit user selection if present
+      const next = farmId ?? globalSelectedFarmId ?? null;
+      setGlobalSelectedFarmId(next);
+      if (next !== farmId) setFarmId?.(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [farmId, globalSelectedFarmId]);
+
+  const currentSelected =
+    (globalSelectedFarmId ?? farmId ?? (farmsSorted[0]?.id ?? "")) as string;
 
   return (
     <div className="animate-fade-slide space-y-6">
@@ -109,13 +137,17 @@ export default function User() {
       <div className="card p-4 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h2 className="text-lg font-semibold">Farm Management</h2>
-          {Array.isArray(farms) && farms.length > 0 && (
+          {Array.isArray(farmsForUI) && farmsForUI.length > 0 && (
             <div className="flex items-center gap-2">
               <label className="text-sm text-slate-600">Current farm:</label>
               <select
                 className="border rounded-lg px-2 py-1 bg-white/80 backdrop-blur-sm shadow-sm"
-                value={farmId ?? (farms[0]?.id ?? "")}
-                onChange={(e) => setFarmId?.(e.target.value)}
+                value={currentSelected}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setGlobalSelectedFarmId(id);
+                  setFarmId?.(id);
+                }}
               >
                 {farmsSorted.map((f: any) => (
                   <option key={f.id} value={f.id}>
@@ -133,20 +165,23 @@ export default function User() {
             <ul className="text-sm space-y-1">
               {(farmsSorted || []).map((f: any) => (
                 <li key={f.id} className="flex items-center justify-between">
-                  <span className={["truncate", f.id === farmId ? "font-semibold" : ""].join(" ")}>
+                  <span className={["truncate", f.id === currentSelected ? "font-semibold" : ""].join(" ")}>
                     {f.name || "Farm " + String(f.id).slice(0, 4)}
                   </span>
-                  {f.id !== farmId && (
+                  {f.id !== currentSelected && (
                     <button
                       className="text-xs rounded border px-2 py-1 hover:bg-slate-50"
-                      onClick={() => setFarmId?.(f.id)}
+                      onClick={() => {
+                        setGlobalSelectedFarmId(f.id);
+                        setFarmId?.(f.id);
+                      }}
                     >
                       Switch
                     </button>
                   )}
                 </li>
               ))}
-              {(!farms || farms.length === 0) && (
+              {(!farmsSorted || farmsSorted.length === 0) && (
                 <li className="text-slate-500">No farms yet.</li>
               )}
             </ul>
