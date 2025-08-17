@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useCloudSlice } from "../lib/cloudSlice";
 
 type Settings = {
@@ -8,9 +8,9 @@ type Settings = {
 type Shed = {
   id: string;
   name: string;
-  placementDate?: string;      // YYYY-MM-DD
-  placementBirds?: number;     // we'll also mirror to birdsPlaced for dashboard compatibility
-  birdsPlaced?: number;        // some dashboards may read this name
+  placementDate?: string;   // YYYY-MM-DD
+  placementBirds?: number;  // mirrored to birdsPlaced
+  birdsPlaced?: number;
 };
 
 function newId() {
@@ -25,12 +25,12 @@ export default function Setup() {
   // Batch length uses a local draft so you can clear/retype easily
   const [batchDraft, setBatchDraft] = useState<string>("");
 
-  // “Saved” flash
+  // Save indicators
   const [justSaved, setJustSaved] = useState(false);
-
-  // For focusing the newly added shed row
+  const autosaveReady = useRef(false); // skip autosave flash on first load
   const [focusId, setFocusId] = useState<string | null>(null);
 
+  // Keep the draft in sync with persisted settings
   useEffect(() => {
     const v = settings.batchLengthDays;
     setBatchDraft(v == null ? "" : String(v));
@@ -48,7 +48,7 @@ export default function Setup() {
     setBatchDraft(String(n));
   }
 
-  // Normalize shed bird fields so both names are present
+  // Normalize shed birds so both names are present
   function normalizeShedBirds(s: Shed): Shed {
     const v =
       s.placementBirds != null ? Number(s.placementBirds) :
@@ -64,7 +64,7 @@ export default function Setup() {
     // Normalize & force push sheds
     setSheds((prev) => {
       const list = (prev || []).map(normalizeShedBirds);
-      return [...list]; // new array to guarantee a write
+      return [...list]; // new array -> guarantees push
     });
 
     // Nudge settings too (in case unchanged object)
@@ -73,6 +73,18 @@ export default function Setup() {
     setJustSaved(true);
     window.setTimeout(() => setJustSaved(false), 1500);
   }
+
+  // 🔄 Autosave feedback when sheds change (edits/adds/removes)
+  useEffect(() => {
+    if (!autosaveReady.current) {
+      autosaveReady.current = true;
+      return;
+    }
+    // cloudSlice already pushes on state change; we show a quick "Saved"
+    setJustSaved(true);
+    const t = window.setTimeout(() => setJustSaved(false), 900);
+    return () => window.clearTimeout(t);
+  }, [sheds]);
 
   // Sorted sheds for stable UI
   const shedsSorted = useMemo(
