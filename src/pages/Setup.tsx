@@ -116,10 +116,12 @@ export default function Setup() {
       <div className="bg-white border rounded-xl p-4">
         <label className="block text-sm text-slate-500 mb-1">Batch length (days)</label>
         <input
-          type="number"
-          min={1}
-          value={settings.batchLengthDays}
-          onChange={(e) => {
+          <input
+            type="number"
+            className="… placeholder-transparent"
+            placeholder="0"
+            … />
+           {
             const next = Math.max(1, Number(e.target.value || 1));
             setSettings({ ...settings, batchLengthDays: next });
            }}
