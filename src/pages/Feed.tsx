@@ -6,10 +6,10 @@ const FEED_TYPES: FeedType[] = ["Starter", "Grower", "Finisher"];
 
 type SiloRow = {
   id: string;
-  name: string;            // silo name
-  type: FeedType;          // Starter/Grower/Finisher
-  capacityT: number;       // capacity in tonnes
-  levelT: number;          // current level in tonnes
+  name: string;
+  type: FeedType;
+  capacityT: number;
+  levelT: number;
   notes?: string;
 };
 
@@ -21,7 +21,7 @@ function emptyRow(): SiloRow {
 }
 
 export default function Feed() {
-  // NOTE: If your existing slice key differs (e.g., "feed"), change "feedSilos" to that.
+  // If your existing slice key differs, change "feedSilos" to match it.
   const [rows, setRows] = useCloudSlice<SiloRow[]>("feedSilos", []);
   const [draft, setDraft] = useState<SiloRow>(emptyRow());
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -118,10 +118,9 @@ export default function Feed() {
           <div>
             <label className="block text-sm mb-1">Capacity (t)</label>
             <input
-              type="number"
-              min={0}
-              step="0.01"
-              className="w-full border rounded px-2 py-1"
+              type="number" min={0} step="0.01"
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
+              placeholder="0"
               value={draft.capacityT}
               onChange={e => setDraft({ ...draft, capacityT: clampNum(e.target.value) })}
             />
@@ -130,10 +129,9 @@ export default function Feed() {
           <div>
             <label className="block text-sm mb-1">Level (t)</label>
             <input
-              type="number"
-              min={0}
-              step="0.01"
-              className="w-full border rounded px-2 py-1"
+              type="number" min={0} step="0.01"
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
+              placeholder="0"
               value={draft.levelT}
               onChange={e => setDraft({ ...draft, levelT: clampNum(e.target.value) })}
             />
@@ -198,10 +196,9 @@ export default function Feed() {
                   <td className="py-2 pr-2">
                     {editingId === r.id ? (
                       <input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        className="border rounded px-2 py-1"
+                        type="number" min={0} step="0.01"
+                        className="border rounded px-2 py-1 placeholder-transparent"
+                        placeholder="0"
                         value={edit?.capacityT ?? 0}
                         onChange={e => setEdit(s => ({ ...(s as SiloRow), capacityT: clampNum(e.target.value) }))}
                       />
@@ -211,10 +208,9 @@ export default function Feed() {
                   <td className="py-2 pr-2">
                     {editingId === r.id ? (
                       <input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        className="border rounded px-2 py-1"
+                        type="number" min={0} step="0.01"
+                        className="border rounded px-2 py-1 placeholder-transparent"
+                        placeholder="0"
                         value={edit?.levelT ?? 0}
                         onChange={e => setEdit(s => ({ ...(s as SiloRow), levelT: clampNum(e.target.value) }))}
                       />
