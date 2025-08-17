@@ -101,8 +101,7 @@ function HeaderFarmSelector() {
         value={farmId ?? (farms[0]?.id ?? "")} onChange={(e) => setFarmId(e.target.value)}>
         {farms.map((f: any) => <option key={f.id} value={f.id}>{f.name || "Farm " + f.id.slice(0, 4)}</option>)}
       </select>
-      <button className="px-3 py-1.5 rounded-lg border border-gray-200 hover:border-gray-300 bg-white/80 hover:bg-white shadow-sm transition"
-        onClick={() => createFarm?.(prompt("New farm name?") || undefined)}>+ New farm</button>
+      
     </div>
   );
 }
