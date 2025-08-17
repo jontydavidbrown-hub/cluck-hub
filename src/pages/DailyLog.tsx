@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useServerState } from "../lib/serverState";
+import { useCloudSlice } from "../lib/cloudSlice";
 import { downloadCsv } from "../lib/csv";
 import { pdfDailyLog } from "../lib/pdfLogs";
 
@@ -18,7 +18,7 @@ function emptyRow(): Row {
 }
 
 export default function DailyLog() {
-  const [rows, setRows] = useServerState<Row[]>("dailyLog", []);
+  const [rows, setRows] = useCloudSlice<Row[]>("dailyLog", []);
   const [draft, setDraft] = useState<Row>(emptyRow());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [edit, setEdit] = useState<Row | null>(null);
