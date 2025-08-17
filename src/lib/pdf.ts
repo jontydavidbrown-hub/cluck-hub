@@ -1,136 +1,141 @@
-// Weights PDF generator (no extra deps)
-// Usage: generateWeightsPdf({ shed, birdsPerBucket, buckets, notes, createdAt })
-import jsPDF from "jspdf";
+// src/lib/pdfLogs.ts
+// Creates a PDF table with the new morts/cull breakdown + day age.
+// Uses jsPDF + jspdf-autotable (same libs your project likely already has).
 
-type WeightsPdfInput = {
-  shed: string;
-  birdsPerBucket: number;
-  buckets: number[]; // each item is total kg of bucket
+type Row = {
+  id?: string;
+  date?: string;                // YYYY-MM-DD
+  shed?: string;
+  morts?: number;
+  cullRunts?: number;
+  cullLegs?: number;
+  cullNonStart?: number;
+  cullOther?: number;
+  culls?: number;
+  mortalities?: number;
   notes?: string;
-  createdAt?: string; // ISO
 };
 
-export function generateWeightsPdf(input: WeightsPdfInput) {
-  const { shed, birdsPerBucket, buckets, notes } = input;
-  const createdAt = input.createdAt ? new Date(input.createdAt) : new Date();
+type Shed = {
+  name?: string;
+  placementDate?: string;
+};
 
-  const doc = new jsPDF({ unit: "pt", format: "a4" });
-  const W = doc.internal.pageSize.getWidth();
-  const margin = 48;
-  let y = margin;
-
-  const title = "Cluck Hub — Weight Report";
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(18);
-  doc.text(title, W / 2, y, { align: "center" });
-  y += 28;
-
-  doc.setFontSize(11);
-  doc.setFont("helvetica", "normal");
-  const meta = [
-    ["Shed", shed || "-"],
-    ["Birds per bucket", String(birdsPerBucket || "-")],
-    ["Entries", String(buckets.length)],
-    ["Date", createdAt.toLocaleString()],
-  ];
-
-  // draw meta two columns
-  const colX = [margin, W / 2];
-  for (let i = 0; i < meta.length; i++) {
-    const [k, v] = meta[i];
-    const x = i < 2 ? colX[0] : colX[1];
-    const row = i % 2;
-    const yRow = y + row * 16;
-    doc.setFont("helvetica", "bold"); doc.text(k + ":", x, yRow);
-    doc.setFont("helvetica", "normal"); doc.text(v, x + 110, yRow);
-  }
-  y += 40;
-
-  // table header
-  const headers = ["#", "Bucket (kg)", "Birds", "Avg/bird (kg)"];
-  const colW = [40, 120, 80, 120];
-  const tableX = margin;
-  let x = tableX;
-
-  doc.setFont("helvetica", "bold");
-  doc.setDrawColor(0);
-  doc.setLineWidth(0.5);
-  doc.rect(tableX - 6, y - 14, sum(colW) + 12, 22); // header box
-
-  for (let i = 0; i < headers.length; i++) {
-    doc.text(headers[i], x, y);
-    x += colW[i];
-  }
-  y += 12;
-  doc.setFont("helvetica", "normal");
-
-  // rows
-  let totalKg = 0;
-  let totalBirds = 0;
-
-  const rowH = 18;
-  for (let i = 0; i < buckets.length; i++) {
-    const kg = buckets[i] ?? 0;
-    const birds = birdsPerBucket || 0;
-    const avg = birds > 0 ? kg / birds : 0;
-    x = tableX;
-
-    if (y + rowH > doc.internal.pageSize.getHeight() - margin - 120) {
-      doc.addPage();
-      y = margin;
-    }
-
-    doc.text(String(i + 1), x, y); x += colW[0];
-    doc.text(fixed(kg, 3), x, y); x += colW[1];
-    doc.text(String(birds), x, y); x += colW[2];
-    doc.text(birds ? fixed(avg, 4) : "-", x, y);
-
-    y += rowH;
-    totalKg += kg;
-    totalBirds += birds;
-  }
-
-  // totals
-  const grandAvg = totalBirds > 0 ? totalKg / totalBirds : 0;
-  y += 8;
-  doc.setFont("helvetica", "bold");
-  doc.text("Totals", tableX, y);
-  doc.setFont("helvetica", "normal");
-  y += 16;
-  const totals = [
-    ["Total buckets", String(buckets.length)],
-    ["Total kg", fixed(totalKg, 3)],
-    ["Total birds", String(totalBirds)],
-    ["Average per bird (kg)", totalBirds ? fixed(grandAvg, 4) : "-"],
-  ];
-  for (const [k, v] of totals) {
-    doc.text(`${k}: ${v}`, tableX, y);
-    y += 16;
-  }
-
-  // notes & sign
-  y += 10;
-  if (notes) {
-    doc.setFont("helvetica", "bold"); doc.text("Notes:", tableX, y);
-    doc.setFont("helvetica", "normal");
-    const wrapped = doc.splitTextToSize(notes, W - margin * 2);
-    y += 16;
-    doc.text(wrapped, tableX, y);
-    y += wrapped.length * 14;
-  }
-
-  y += 24;
-  doc.text("Verified by: ____________________________", tableX, y);
-  y += 24;
-  doc.text(`Generated: ${createdAt.toLocaleString()}`, tableX, y);
-
-  doc.save(makeFileName(`weights_${shed || "shed"}_${createdAt.toISOString().slice(0,10)}`));
+function num(n: any) {
+  const v = Number(n);
+  return Number.isFinite(v) ? v : 0;
 }
 
-function fixed(n: number, dp: number) {
-  return (Math.round(n * 10**dp) / 10**dp).toFixed(dp);
+function sumCulls(r: Partial<Row>) {
+  return num(r.cullRunts) + num(r.cullLegs) + num(r.cullNonStart) + num(r.cullOther);
 }
-function sum(a: number[]) { return a.reduce((s, n) => s + n, 0); }
-function makeFileName(b: string) {
-  return b.replace(/[^a-z0-9_\-]/gi, "_") + ".pdf";
+
+function daysBetweenUTC(a?: string, b?: string) {
+  if (!a || !b) return "";
+  const A = new Date(a + "T00:00:00Z").getTime();
+  const B = new Date(b + "T00:00:00Z").getTime();
+  if (!Number.isFinite(A) || !Number.isFinite(B)) return "";
+  return String(Math.floor((B - A) / (1000 * 60 * 60 * 24)));
+}
+
+export async function pdfDailyLog(
+  rows: Row[],
+  sheds?: Shed[],
+  opts?: { title?: string; filename?: string }
+) {
+  const { jsPDF } = await import("jspdf");
+  const autoTable = (await import("jspdf-autotable")).default;
+
+  const byShedPlacement = new Map<string, string | undefined>();
+  for (const s of sheds || []) {
+    const k = (s?.name || "").trim();
+    if (k) byShedPlacement.set(k, s?.placementDate);
+  }
+  const today = new Date().toISOString().slice(0, 10);
+
+  const title = opts?.title ?? "Morts & Culls";
+  const filename = opts?.filename ?? "morts.pdf";
+
+  const doc = new jsPDF({ orientation: "landscape" });
+  doc.setFontSize(16);
+  doc.text(title, 14, 16);
+
+  // Table data
+  const head = [[
+    "Date",
+    "Shed",
+    "Day Age",
+    "Morts",
+    "Cull Runts",
+    "Cull Legs",
+    "Cull Non-Start",
+    "Cull Other",
+    "Culls",
+    "Mortalities",
+    "Notes",
+  ]];
+
+  let totalMorts = 0,
+      totalRunts = 0,
+      totalLegs = 0,
+      totalNonStart = 0,
+      totalOther = 0,
+      totalCulls = 0,
+      totalMortalities = 0;
+
+  const body = (rows || []).map((r) => {
+    const morts = num(r.morts);
+    const runts = num(r.cullRunts);
+    const legs = num(r.cullLegs);
+    const nonStart = num(r.cullNonStart);
+    const other = num(r.cullOther);
+    const culls = runts + legs + nonStart + other;
+    const mortalities = num(r.mortalities) || morts + culls;
+    const shedName = (r.shed || "").trim();
+    const dayAge = daysBetweenUTC(byShedPlacement.get(shedName), r.date || today);
+
+    totalMorts += morts;
+    totalRunts += runts;
+    totalLegs += legs;
+    totalNonStart += nonStart;
+    totalOther += other;
+    totalCulls += culls;
+    totalMortalities += mortalities;
+
+    return [
+      r.date || "",
+      shedName,
+      dayAge,
+      morts,
+      runts,
+      legs,
+      nonStart,
+      other,
+      culls,
+      mortalities,
+      r.notes || "",
+    ];
+  });
+
+  autoTable(doc, {
+    head,
+    body,
+    startY: 22,
+    styles: { fontSize: 9, cellPadding: 2 },
+    headStyles: { fillColor: [22, 163, 74] }, // emerald-ish
+    theme: "striped",
+    didDrawPage: (data) => {
+      // Footer with totals on each page bottom-right
+      const pageSize = doc.internal.pageSize;
+      const x = pageSize.getWidth() - 10;
+      const y = pageSize.getHeight() - 10;
+
+      const totals = `Totals — Morts: ${totalMorts} | Culls: ${totalCulls} (Runts ${totalRunts}, Legs ${totalLegs}, Non-Start ${totalNonStart}, Other ${totalOther}) | Mortalities: ${totalMortalities}`;
+      doc.setFontSize(8);
+      const w = doc.getTextWidth(totals);
+      doc.text(totals, x - w, y);
+    },
+  });
+
+  doc.save(filename);
 }
