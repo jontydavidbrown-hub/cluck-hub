@@ -11,7 +11,8 @@ type Ctx = {
   createFarm: (name: string) => Promise<{ id: string; name: string }>;
 };
 
-const FarmCtx = createContext<Ctx | undefined>(undefined);
+// ⬇️ Exported so cloudSlice can read it via useContext without throwing
+export const FarmCtx = createContext<Ctx | undefined>(undefined);
 
 function newId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
