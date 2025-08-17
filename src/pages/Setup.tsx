@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useServerState } from "../lib/serverState";
+import { useCloudSlice } from "../lib/cloudSlice";
 import { DEFAULT_SETTINGS, normalizeSettings } from "../lib/defaults";
 
 
@@ -18,10 +18,10 @@ function todayISO() { return new Date().toISOString().slice(0, 10); }
 export default function Setup() {
   // sheds
   const { state: shedsRaw, setState: setSheds, loading, synced } =
-    useServerState<any>("sheds", []);
+    useCloudSlice<any>("sheds", []);
   // settings (batch length already added previously)
   const { state: settingsRaw, setState: setSettings } =
-    useServerState<Settings>("settings", DEFAULT_SETTINGS);
+    useCloudSlice<Settings>("settings", DEFAULT_SETTINGS);
 
   const settings = normalizeSettings(settingsRaw);
 
