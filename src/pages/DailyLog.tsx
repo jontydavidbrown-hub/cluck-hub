@@ -12,9 +12,12 @@ type Row = {
   notes?: string;
 };
 
+function newId() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 function emptyRow(): Row {
   const today = new Date().toISOString().slice(0, 10);
-  return { id: crypto.randomUUID(), date: today, shed: "", mortalities: 0, culls: 0, notes: "" };
+  return { id: newId(), date: today, shed: "", mortalities: 0, culls: 0, notes: "" };
 }
 
 export default function DailyLog() {
@@ -38,7 +41,13 @@ export default function DailyLog() {
 
   const addRow = () => {
     if (!draft.date) return;
-    setRows([...(rows || []), { ...draft, mortalities: Number(draft.mortalities) || 0, culls: Number(draft.culls) || 0 }]);
+    const cleaned: Row = {
+      ...draft,
+      mortalities: Number(draft.mortalities) || 0,
+      culls: Number(draft.culls) || 0,
+      id: draft.id || newId(),
+    };
+    setRows(prev => [...(prev || []), cleaned]);
     setDraft(emptyRow());
   };
 
@@ -49,14 +58,19 @@ export default function DailyLog() {
 
   const saveEdit = () => {
     if (!edit) return;
-    setRows(rows.map(r => (r.id === edit.id ? { ...edit, mortalities: Number(edit.mortalities) || 0, culls: Number(edit.culls) || 0 } : r)));
+    const cleaned = {
+      ...edit,
+      mortalities: Number(edit.mortalities) || 0,
+      culls: Number(edit.culls) || 0,
+    };
+    setRows(prev => prev.map(r => (r.id === cleaned.id ? cleaned : r)));
     setEditingId(null);
     setEdit(null);
   };
 
   const remove = (id: string) => {
     if (!confirm("Remove this entry?")) return;
-    setRows(rows.filter(r => r.id !== id));
+    setRows(prev => prev.filter(r => r.id !== id));
   };
 
   return (
@@ -79,29 +93,51 @@ export default function DailyLog() {
         <div className="grid md:grid-cols-6 gap-3">
           <div>
             <label className="block text-sm mb-1">Date</label>
-            <input type="date" className="w-full border rounded px-2 py-1"
-              value={draft.date} onChange={e => setDraft({ ...draft, date: e.target.value })} />
+            <input
+              type="date"
+              className="w-full border rounded px-2 py-1"
+              value={draft.date}
+              onChange={e => setDraft({ ...draft, date: e.target.value })}
+            />
           </div>
           <div>
             <label className="block text-sm mb-1">Shed</label>
-            <input type="text" className="w-full border rounded px-2 py-1"
+            <input
+              type="text"
+              className="w-full border rounded px-2 py-1"
               placeholder="e.g., Shed 1"
-              value={draft.shed ?? ""} onChange={e => setDraft({ ...draft, shed: e.target.value })} />
+              value={draft.shed ?? ""}
+              onChange={e => setDraft({ ...draft, shed: e.target.value })}
+            />
           </div>
           <div>
             <label className="block text-sm mb-1">Mortalities</label>
-            <input type="number" min={0} className="w-full border rounded px-2 py-1"
-              value={draft.mortalities ?? 0} onChange={e => setDraft({ ...draft, mortalities: Number(e.target.value) })} />
+            <input
+              type="number" min={0}
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
+              placeholder="0"
+              value={draft.mortalities ?? 0}
+              onChange={e => setDraft({ ...draft, mortalities: Number(e.target.value) })}
+            />
           </div>
           <div>
             <label className="block text-sm mb-1">Culls</label>
-            <input type="number" min={0} className="w-full border rounded px-2 py-1"
-              value={draft.culls ?? 0} onChange={e => setDraft({ ...draft, culls: Number(e.target.value) })} />
+            <input
+              type="number" min={0}
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
+              placeholder="0"
+              value={draft.culls ?? 0}
+              onChange={e => setDraft({ ...draft, culls: Number(e.target.value) })}
+            />
           </div>
           <div className="md:col-span-2">
             <label className="block text-sm mb-1">Notes</label>
-            <input type="text" className="w-full border rounded px-2 py-1"
-              value={draft.notes ?? ""} onChange={e => setDraft({ ...draft, notes: e.target.value })} />
+            <input
+              type="text"
+              className="w-full border rounded px-2 py-1"
+              value={draft.notes ?? ""}
+              onChange={e => setDraft({ ...draft, notes: e.target.value })}
+            />
           </div>
         </div>
         <div className="mt-3">
@@ -128,32 +164,52 @@ export default function DailyLog() {
                 <tr key={r.id} className="border-b">
                   <td className="py-2 pr-2">
                     {editingId === r.id ? (
-                      <input type="date" className="border rounded px-2 py-1"
-                        value={edit?.date || ""} onChange={e => setEdit(s => ({ ...(s as Row), date: e.target.value }))} />
+                      <input
+                        type="date"
+                        className="border rounded px-2 py-1"
+                        value={edit?.date || ""}
+                        onChange={e => setEdit(s => ({ ...(s as Row), date: e.target.value }))}
+                      />
                     ) : r.date}
                   </td>
                   <td className="py-2 pr-2">
                     {editingId === r.id ? (
-                      <input className="border rounded px-2 py-1" value={edit?.shed || ""}
-                        onChange={e => setEdit(s => ({ ...(s as Row), shed: e.target.value }))} />
+                      <input
+                        className="border rounded px-2 py-1"
+                        value={edit?.shed || ""}
+                        onChange={e => setEdit(s => ({ ...(s as Row), shed: e.target.value }))}
+                      />
                     ) : (r.shed || "")}
                   </td>
                   <td className="py-2 pr-2">
                     {editingId === r.id ? (
-                      <input type="number" min={0} className="border rounded px-2 py-1" value={edit?.mortalities ?? 0}
-                        onChange={e => setEdit(s => ({ ...(s as Row), mortalities: Number(e.target.value) }))} />
+                      <input
+                        type="number" min={0}
+                        className="border rounded px-2 py-1 placeholder-transparent"
+                        placeholder="0"
+                        value={edit?.mortalities ?? 0}
+                        onChange={e => setEdit(s => ({ ...(s as Row), mortalities: Number(e.target.value) }))}
+                      />
                     ) : (r.mortalities ?? 0)}
                   </td>
                   <td className="py-2 pr-2">
                     {editingId === r.id ? (
-                      <input type="number" min={0} className="border rounded px-2 py-1" value={edit?.culls ?? 0}
-                        onChange={e => setEdit(s => ({ ...(s as Row), culls: Number(e.target.value) }))} />
+                      <input
+                        type="number" min={0}
+                        className="border rounded px-2 py-1 placeholder-transparent"
+                        placeholder="0"
+                        value={edit?.culls ?? 0}
+                        onChange={e => setEdit(s => ({ ...(s as Row), culls: Number(e.target.value) }))}
+                      />
                     ) : (r.culls ?? 0)}
                   </td>
                   <td className="py-2 pr-2">
                     {editingId === r.id ? (
-                      <input className="border rounded px-2 py-1" value={edit?.notes || ""}
-                        onChange={e => setEdit(s => ({ ...(s as Row), notes: e.target.value }))} />
+                      <input
+                        className="border rounded px-2 py-1"
+                        value={edit?.notes || ""}
+                        onChange={e => setEdit(s => ({ ...(s as Row), notes: e.target.value }))}
+                      />
                     ) : (r.notes || "")}
                   </td>
                   <td className="py-2 pr-2">
