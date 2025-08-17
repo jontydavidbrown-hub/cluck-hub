@@ -120,7 +120,7 @@ export default function Setup() {
           placeholder="0"
           className="w-full border rounded px-2 py-1 placeholder-transparent"
           value={something}
-           onChange={e => setSomething(Number(e.target.value))}
+          onChange={e => setSomething(Number(e.target.value))}
         />
 
            {
