@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useServerState } from "../lib/serverState";
+import { useCloudSlice } from "../lib/cloudSlice";
 import { generateWeightsPdf } from "../lib/pdf";
 
 type Shed = { id: string; name: string };
@@ -51,7 +51,7 @@ function SectionCard({ title, children, actions }: { title: string; children: Re
 
 export default function Weights() {
   // keep a hook into server state (unchanged behavior) even though this slice uses LS
-  const server = useServerState() as any;
+  const server = useCloudSlice() as any;
 
   // Sheds and weights
   const [sheds, setSheds] = useState<Shed[]>([]);
