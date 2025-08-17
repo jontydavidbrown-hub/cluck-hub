@@ -16,7 +16,7 @@ import Analytics from "./pages/Analytics";
 import Members from "./pages/Members";
 import User from "./pages/User";
 
-import ErrorBoundary from "./pages/ErrorBoundary";
+import ErrorBoundary from "./lib/ErrorBoundary";
 
 const router = createBrowserRouter([
   {
