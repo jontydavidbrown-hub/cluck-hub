@@ -1,144 +1,280 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+// src/pages/Morts.tsx
+import { useEffect, useMemo, useState } from "react";
 import { useCloudSlice } from "../lib/cloudSlice";
-import { downloadCsv } from "../lib/csv";
-import { pdfDailyLog } from "../lib/pdfLogs";
-import { useLocation } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
+
+type Shed = {
+  id: string;
+  name: string;
+  placementDate?: string;     // YYYY-MM-DD
+  placementBirds?: number;
+  birdsPlaced?: number;
+};
 
 type Row = {
   id: string;
-  date: string;            // YYYY-MM-DD
+  date: string;               // YYYY-MM-DD
   shed?: string;
-  mortalities?: number;
-  culls?: number;
+
+  // Requested explicit fields
+  morts?: number;             // natural deaths
+  cullRunts?: number;
+  cullLegs?: number;
+  cullNonStart?: number;
+  cullOther?: number;
+
+  // Compatibility fields used by dashboard
+  culls?: number;             // sum of all cull categories
+  mortalities?: number;       // morts + culls
+
   notes?: string;
 };
 
-function newId() {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
-function emptyRow(): Row {
+function emptyRow(prefillShed = ""): Row {
   const today = new Date().toISOString().slice(0, 10);
-  return { id: newId(), date: today, shed: "", mortalities: undefined, culls: undefined, notes: "" };
+  return {
+    id: crypto.randomUUID(),
+    date: today,
+    shed: prefillShed,
+    morts: 0,
+    cullRunts: 0,
+    cullLegs: 0,
+    cullNonStart: 0,
+    cullOther: 0,
+    culls: 0,
+    mortalities: 0,
+    notes: "",
+  };
+}
+
+function sumCulls(r: Partial<Row>) {
+  return (Number(r.cullRunts) || 0)
+       + (Number(r.cullLegs) || 0)
+       + (Number(r.cullNonStart) || 0)
+       + (Number(r.cullOther) || 0);
+}
+function clampNum(n: any) {
+  const v = Number(n);
+  return Number.isFinite(v) && v >= 0 ? v : 0;
+}
+function daysBetweenUTC(a?: string, b?: string) {
+  if (!a || !b) return undefined;
+  const A = new Date(a + "T00:00:00Z").getTime();
+  const B = new Date(b + "T00:00:00Z").getTime();
+  return Math.floor((B - A) / (1000 * 60 * 60 * 24));
 }
 
 export default function Morts() {
+  const [search] = useSearchParams();
+  const preselectShed = search.get("shed") || "";
+
   const [rows, setRows] = useCloudSlice<Row[]>("dailyLog", []);
-  const [draft, setDraft] = useState<Row>(emptyRow());
+  const [sheds] = useCloudSlice<Shed[]>("sheds", []);
+
+  const [draft, setDraft] = useState<Row>(emptyRow(preselectShed));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [edit, setEdit] = useState<Row | null>(null);
 
-  // Preselect shed and focus mortalities if requested
-  const location = useLocation();
-  const mortsRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const preset = params.get("shed") || "";
-    const focus = params.get("focus") || "";
-    if (preset) setDraft((d) => ({ ...d, shed: preset }));
-    if (focus === "mortalities") {
-      const t = window.setTimeout(() => mortsRef.current?.focus(), 0);
-      return () => window.clearTimeout(t);
-    }
-  }, [location.search]);
+  // Keep shed list stable by name for selects
+  const shedNames = useMemo(
+    () => (sheds || []).map(s => s.name || "").filter(Boolean).sort((a, b) => a.localeCompare(b)),
+    [sheds]
+  );
 
+  // Sorted global view (by date asc, then shed)
   const sorted = useMemo(
-    () => [...(rows || [])].sort((a, b) => a.date.localeCompare(b.date)),
+    () =>
+      [...(rows || [])].sort((a, b) =>
+        (a.date || "").localeCompare(b.date || "") || (a.shed || "").localeCompare(b.shed || "")
+      ),
     [rows]
   );
 
-  const totals = useMemo(
-    () => ({
-      mortalities: (rows || []).reduce((sum, r) => sum + (Number(r.mortalities) || 0), 0),
-      culls: (rows || []).reduce((sum, r) => sum + (Number(r.culls) || 0), 0),
-    }),
-    [rows]
-  );
+  // Group rows by shed for breakdown
+  const byShed = useMemo(() => {
+    const m = new Map<string, Row[]>();
+    for (const r of sorted) {
+      const key = (r.shed || "").trim() || "(No shed)";
+      if (!m.has(key)) m.set(key, []);
+      m.get(key)!.push(r);
+    }
+    return m;
+  }, [sorted]);
 
-  const addRow = () => {
+  // Lookup placementDate for day age
+  const placementByShed = useMemo(() => {
+    const m = new Map<string, string | undefined>();
+    for (const s of sheds || []) {
+      const name = (s.name || "").trim();
+      if (name) m.set(name, s.placementDate);
+    }
+    return m;
+  }, [sheds]);
+
+  useEffect(() => {
+    // If URL preselects shed and draft is empty, apply once
+    if (preselectShed && !draft.shed) {
+      setDraft(d => ({ ...d, shed: preselectShed }));
+    }
+  }, [preselectShed]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- CRUD helpers
+  function normalize(r: Row): Row {
+    const morts = clampNum(r.morts);
+    const cRunts = clampNum(r.cullRunts);
+    const cLegs = clampNum(r.cullLegs);
+    const cNon = clampNum(r.cullNonStart);
+    const cOther = clampNum(r.cullOther);
+    const culls = cRunts + cLegs + cNon + cOther;
+    const mortalities = morts + culls;
+    return {
+      ...r,
+      morts,
+      cullRunts: cRunts,
+      cullLegs: cLegs,
+      cullNonStart: cNon,
+      cullOther: cOther,
+      culls,
+      mortalities,
+    };
+  }
+
+  function addRow() {
     if (!draft.date) return;
-    const cleaned: Row = {
-      ...draft,
-      mortalities: draft.mortalities == null || (draft.mortalities as any) === "" ? 0 : Number(draft.mortalities) || 0,
-      culls: draft.culls == null || (draft.culls as any) === "" ? 0 : Number(draft.culls) || 0,
-      id: draft.id || newId(),
-    };
-    setRows(prev => [...(prev || []), cleaned]);
-    setDraft(emptyRow());
-  };
+    const cleaned = normalize(draft);
+    setRows([...(rows || []), cleaned]);
+    setDraft(emptyRow(preselectShed));
+  }
 
-  const startEdit = (r: Row) => { setEditingId(r.id); setEdit({ ...r }); };
-  const saveEdit = () => {
+  function startEdit(r: Row) {
+    setEditingId(r.id);
+    setEdit({ ...r });
+  }
+
+  function saveEdit() {
     if (!edit) return;
-    const cleaned: Row = {
-      ...edit,
-      mortalities: edit.mortalities == null || (edit.mortalities as any) === "" ? 0 : Number(edit.mortalities) || 0,
-      culls: edit.culls == null || (edit.culls as any) === "" ? 0 : Number(edit.culls) || 0,
-    };
-    setRows(prev => prev.map(r => (r.id === cleaned.id ? cleaned : r)));
-    setEditingId(null); setEdit(null);
-  };
-  const remove = (id: string) => {
-    if (!confirm("Remove this entry?")) return;
-    setRows(prev => prev.filter(r => r.id !== id));
-  };
+    const cleaned = normalize(edit);
+    setRows((rows || []).map(r => (r.id === cleaned.id ? cleaned : r)));
+    setEditingId(null);
+    setEdit(null);
+  }
 
+  function remove(id: string) {
+    if (!confirm("Remove this entry?")) return;
+    setRows((rows || []).filter(r => r.id !== id));
+  }
+
+  // ---- UI
   return (
     <div className="p-4 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Morts</h1>
-        <div className="flex gap-2">
-          <button className="px-3 py-1 border rounded" onClick={() => downloadCsv("morts.csv", rows as any[])}>
-            Export CSV
-          </button>
-          <button className="px-3 py-1 border rounded" onClick={() => pdfDailyLog(rows as any[])}>
-            Export PDF
-          </button>
-        </div>
       </div>
 
       {/* Add form */}
       <div className="p-4 border rounded-2xl bg-white">
         <div className="font-medium mb-3">Add entry</div>
-        <div className="grid md:grid-cols-6 gap-3">
+        <div className="grid md:grid-cols-8 gap-3">
           <div>
             <label className="block text-sm mb-1">Date</label>
-            <input type="date" className="w-full border rounded px-2 py-1"
-              value={draft.date} onChange={e => setDraft({ ...draft, date: e.target.value })} />
+            <input
+              type="date"
+              className="w-full border rounded px-2 py-1"
+              value={draft.date}
+              onChange={(e) => setDraft({ ...draft, date: e.target.value })}
+            />
           </div>
-          <div>
+
+          <div className="md:col-span-2">
             <label className="block text-sm mb-1">Shed</label>
-            <input type="text" className="w-full border rounded px-2 py-1"
+            <input
+              list="shed-list"
+              className="w-full border rounded px-2 py-1"
               placeholder="e.g., Shed 1"
-              value={draft.shed ?? ""} onChange={e => setDraft({ ...draft, shed: e.target.value })} />
+              value={draft.shed ?? ""}
+              onChange={(e) => setDraft({ ...draft, shed: e.target.value })}
+            />
+            <datalist id="shed-list">
+              {shedNames.map((n) => (
+                <option key={n} value={n} />
+              ))}
+            </datalist>
           </div>
+
           <div>
-            <label className="block text-sm mb-1">Mortalities</label>
-            <input ref={mortsRef} type="number" min={0}
-              className="w-full border rounded px-2 py-1 placeholder-transparent"
-              placeholder="0"
-              value={draft.mortalities ?? ""}
-              onChange={e => setDraft({ ...draft, mortalities: e.target.value === "" ? undefined : Number(e.target.value) })} />
+            <label className="block text-sm mb-1">Morts</label>
+            <input
+              type="number"
+              min={0}
+              className="w-full border rounded px-2 py-1"
+              value={draft.morts ?? 0}
+              onChange={(e) => setDraft({ ...draft, morts: clampNum(e.target.value) })}
+            />
           </div>
+
           <div>
-            <label className="block text-sm mb-1">Culls</label>
-            <input type="number" min={0}
-              className="w-full border rounded px-2 py-1 placeholder-transparent"
-              placeholder="0"
-              value={draft.culls ?? ""}
-              onChange={e => setDraft({ ...draft, culls: e.target.value === "" ? undefined : Number(e.target.value) })} />
+            <label className="block text-sm mb-1">Cull Runts</label>
+            <input
+              type="number"
+              min={0}
+              className="w-full border rounded px-2 py-1"
+              value={draft.cullRunts ?? 0}
+              onChange={(e) => setDraft({ ...draft, cullRunts: clampNum(e.target.value) })}
+            />
           </div>
+
+          <div>
+            <label className="block text-sm mb-1">Cull Legs</label>
+            <input
+              type="number"
+              min={0}
+              className="w-full border rounded px-2 py-1"
+              value={draft.cullLegs ?? 0}
+              onChange={(e) => setDraft({ ...draft, cullLegs: clampNum(e.target.value) })}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm mb-1">Cull Non-Start</label>
+            <input
+              type="number"
+              min={0}
+              className="w-full border rounded px-2 py-1"
+              value={draft.cullNonStart ?? 0}
+              onChange={(e) => setDraft({ ...draft, cullNonStart: clampNum(e.target.value) })}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm mb-1">Cull Other</label>
+            <input
+              type="number"
+              min={0}
+              className="w-full border rounded px-2 py-1"
+              value={draft.cullOther ?? 0}
+              onChange={(e) => setDraft({ ...draft, cullOther: clampNum(e.target.value) })}
+            />
+          </div>
+
           <div className="md:col-span-2">
             <label className="block text-sm mb-1">Notes</label>
-            <input type="text" className="w-full border rounded px-2 py-1"
-              value={draft.notes ?? ""} onChange={e => setDraft({ ...draft, notes: e.target.value })} />
+            <input
+              type="text"
+              className="w-full border rounded px-2 py-1"
+              value={draft.notes ?? ""}
+              onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
+            />
           </div>
         </div>
+
         <div className="mt-3">
-          <button className="px-4 py-2 rounded bg-black text-white" onClick={addRow}>Add</button>
+          <button className="px-4 py-2 rounded bg-black text-white" onClick={addRow}>
+            Add
+          </button>
         </div>
       </div>
 
-      {/* Table */}
+      {/* Main table */}
       <div className="p-4 border rounded-2xl bg-white">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -146,76 +282,221 @@ export default function Morts() {
               <tr className="text-left border-b">
                 <th className="py-2 pr-2">Date</th>
                 <th className="py-2 pr-2">Shed</th>
-                <th className="py-2 pr-2">Mortalities</th>
-                <th className="py-2 pr-2">Culls</th>
+                <th className="py-2 pr-2">Morts</th>
+                <th className="py-2 pr-2">Cull Runts</th>
+                <th className="py-2 pr-2">Cull Legs</th>
+                <th className="py-2 pr-2">Cull Non-Start</th>
+                <th className="py-2 pr-2">Cull Other</th>
+                <th className="py-2 pr-2">Total</th>
                 <th className="py-2 pr-2">Notes</th>
                 <th className="py-2 pr-2">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {sorted.map(r => (
-                <tr key={r.id} className="border-b">
-                  <td className="py-2 pr-2">
-                    {editingId === r.id ? (
-                      <input type="date" className="border rounded px-2 py-1"
-                        value={edit?.date || ""} onChange={e => setEdit(s => ({ ...(s as Row), date: e.target.value }))} />
-                    ) : r.date}
-                  </td>
-                  <td className="py-2 pr-2">
-                    {editingId === r.id ? (
-                      <input className="border rounded px-2 py-1" value={edit?.shed || ""}
-                        onChange={e => setEdit(s => ({ ...(s as Row), shed: e.target.value }))} />
-                    ) : (r.shed || "")}
-                  </td>
-                  <td className="py-2 pr-2">
-                    {editingId === r.id ? (
-                      <input type="number" min={0} className="border rounded px-2 py-1 placeholder-transparent"
-                        placeholder="0"
-                        value={edit?.mortalities ?? ""} onChange={e => setEdit(s => ({ ...(s as Row), mortalities: e.target.value === "" ? undefined : Number(e.target.value) }))} />
-                    ) : (Number(r.mortalities) || 0)}
-                  </td>
-                  <td className="py-2 pr-2">
-                    {editingId === r.id ? (
-                      <input type="number" min={0} className="border rounded px-2 py-1 placeholder-transparent"
-                        placeholder="0"
-                        value={edit?.culls ?? ""} onChange={e => setEdit(s => ({ ...(s as Row), culls: e.target.value === "" ? undefined : Number(e.target.value) }))} />
-                    ) : (Number(r.culls) || 0)}
-                  </td>
-                  <td className="py-2 pr-2">
-                    {editingId === r.id ? (
-                      <input className="border rounded px-2 py-1" value={edit?.notes || ""}
-                        onChange={e => setEdit(s => ({ ...(s as Row), notes: e.target.value }))} />
-                    ) : (r.notes || "")}
-                  </td>
-                  <td className="py-2 pr-2">
-                    {editingId === r.id ? (
-                      <div className="flex gap-2">
-                        <button className="px-2 py-1 border rounded" onClick={saveEdit}>Save</button>
-                        <button className="px-2 py-1 border rounded" onClick={() => { setEditingId(null); setEdit(null); }}>Cancel</button>
-                      </div>
-                    ) : (
-                      <div className="flex gap-2">
-                        <button className="px-2 py-1 border rounded" onClick={() => startEdit(r)}>Edit</button>
-                        <button className="px-2 py-1 border rounded text-red-600" onClick={() => remove(r.id)}>Remove</button>
-                      </div>
-                    )}
+              {sorted.map((r) => {
+                const total = clampNum(r.morts) + sumCulls(r);
+                return (
+                  <tr key={r.id} className="border-b">
+                    <td className="py-2 pr-2">
+                      {editingId === r.id ? (
+                        <input
+                          type="date"
+                          className="border rounded px-2 py-1"
+                          value={edit?.date || ""}
+                          onChange={(e) => setEdit((s) => ({ ...(s as Row), date: e.target.value }))}
+                        />
+                      ) : (
+                        r.date
+                      )}
+                    </td>
+                    <td className="py-2 pr-2">
+                      {editingId === r.id ? (
+                        <input
+                          list="shed-list"
+                          className="border rounded px-2 py-1"
+                          value={edit?.shed || ""}
+                          onChange={(e) => setEdit((s) => ({ ...(s as Row), shed: e.target.value }))}
+                        />
+                      ) : (
+                        r.shed || ""
+                      )}
+                    </td>
+                    <td className="py-2 pr-2">
+                      {editingId === r.id ? (
+                        <input
+                          type="number"
+                          min={0}
+                          className="border rounded px-2 py-1"
+                          value={edit?.morts ?? 0}
+                          onChange={(e) => setEdit((s) => ({ ...(s as Row), morts: clampNum(e.target.value) }))}
+                        />
+                      ) : (
+                        r.morts ?? 0
+                      )}
+                    </td>
+                    <td className="py-2 pr-2">
+                      {editingId === r.id ? (
+                        <input
+                          type="number"
+                          min={0}
+                          className="border rounded px-2 py-1"
+                          value={edit?.cullRunts ?? 0}
+                          onChange={(e) => setEdit((s) => ({ ...(s as Row), cullRunts: clampNum(e.target.value) }))}
+                        />
+                      ) : (
+                        r.cullRunts ?? 0
+                      )}
+                    </td>
+                    <td className="py-2 pr-2">
+                      {editingId === r.id ? (
+                        <input
+                          type="number"
+                          min={0}
+                          className="border rounded px-2 py-1"
+                          value={edit?.cullLegs ?? 0}
+                          onChange={(e) => setEdit((s) => ({ ...(s as Row), cullLegs: clampNum(e.target.value) }))}
+                        />
+                      ) : (
+                        r.cullLegs ?? 0
+                      )}
+                    </td>
+                    <td className="py-2 pr-2">
+                      {editingId === r.id ? (
+                        <input
+                          type="number"
+                          min={0}
+                          className="border rounded px-2 py-1"
+                          value={edit?.cullNonStart ?? 0}
+                          onChange={(e) => setEdit((s) => ({ ...(s as Row), cullNonStart: clampNum(e.target.value) }))}
+                        />
+                      ) : (
+                        r.cullNonStart ?? 0
+                      )}
+                    </td>
+                    <td className="py-2 pr-2">
+                      {editingId === r.id ? (
+                        <input
+                          type="number"
+                          min={0}
+                          className="border rounded px-2 py-1"
+                          value={edit?.cullOther ?? 0}
+                          onChange={(e) => setEdit((s) => ({ ...(s as Row), cullOther: clampNum(e.target.value) }))}
+                        />
+                      ) : (
+                        r.cullOther ?? 0
+                      )}
+                    </td>
+                    <td className="py-2 pr-2">{total}</td>
+                    <td className="py-2 pr-2">
+                      {editingId === r.id ? (
+                        <input
+                          className="border rounded px-2 py-1"
+                          value={edit?.notes || ""}
+                          onChange={(e) => setEdit((s) => ({ ...(s as Row), notes: e.target.value }))}
+                        />
+                      ) : (
+                        r.notes || ""
+                      )}
+                    </td>
+                    <td className="py-2 pr-2">
+                      {editingId === r.id ? (
+                        <div className="flex gap-2">
+                          <button className="px-2 py-1 border rounded" onClick={saveEdit}>
+                            Save
+                          </button>
+                          <button
+                            className="px-2 py-1 border rounded"
+                            onClick={() => {
+                              setEditingId(null);
+                              setEdit(null);
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          <button className="px-2 py-1 border rounded" onClick={() => startEdit(r)}>
+                            Edit
+                          </button>
+                          <button
+                            className="px-2 py-1 border rounded text-red-600"
+                            onClick={() => remove(r.id)}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {sorted.length === 0 && (
+                <tr>
+                  <td className="py-6 text-gray-500" colSpan={10}>
+                    No entries yet.
                   </td>
                 </tr>
-              ))}
-              {(sorted || []).length === 0 && (
-                <tr><td className="py-6 text-gray-500" colSpan={6}>No entries yet.</td></tr>
               )}
             </tbody>
-            <tfoot>
-              <tr className="font-medium">
-                <td className="py-2 pr-2" colSpan={2}>Totals</td>
-                <td className="py-2 pr-2">{totals.mortalities}</td>
-                <td className="py-2 pr-2">{totals.culls}</td>
-                <td className="py-2 pr-2" colSpan={2}></td>
-              </tr>
-            </tfoot>
           </table>
         </div>
+      </div>
+
+      {/* Per-shed breakdown */}
+      <div className="space-y-4">
+        {[...byShed.entries()].map(([shedName, list]) => {
+          const placement = placementByShed.get(shedName);
+          // Show newest first in the breakdown
+          const rowsDesc = [...list].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+
+          return (
+            <div key={shedName} className="p-4 border rounded-2xl bg-white">
+              <div className="font-medium mb-3">Breakdown — {shedName}</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left border-b">
+                      <th className="py-2 pr-2">Date</th>
+                      <th className="py-2 pr-2">Day Age</th>
+                      <th className="py-2 pr-2">Morts</th>
+                      <th className="py-2 pr-2">Cull Runts</th>
+                      <th className="py-2 pr-2">Cull Legs</th>
+                      <th className="py-2 pr-2">Cull Non-Start</th>
+                      <th className="py-2 pr-2">Cull Other</th>
+                      <th className="py-2 pr-2">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rowsDesc.map((r) => {
+                      const age = placement ? daysBetweenUTC(placement, r.date) : undefined;
+                      const total = clampNum(r.morts) + sumCulls(r);
+                      return (
+                        <tr key={r.id} className="border-b">
+                          <td className="py-2 pr-2">{r.date}</td>
+                          <td className="py-2 pr-2">{typeof age === "number" ? age : "—"}</td>
+                          <td className="py-2 pr-2">{r.morts ?? 0}</td>
+                          <td className="py-2 pr-2">{r.cullRunts ?? 0}</td>
+                          <td className="py-2 pr-2">{r.cullLegs ?? 0}</td>
+                          <td className="py-2 pr-2">{r.cullNonStart ?? 0}</td>
+                          <td className="py-2 pr-2">{r.cullOther ?? 0}</td>
+                          <td className="py-2 pr-2">{total}</td>
+                        </tr>
+                      );
+                    })}
+                    {rowsDesc.length === 0 && (
+                      <tr>
+                        <td className="py-4 text-gray-500" colSpan={8}>
+                          No entries.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
