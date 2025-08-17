@@ -1,12 +1,12 @@
 // src/App.tsx
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 
 function cx(...classes: (string | false | null | undefined)[]) {
   return classes.filter(Boolean).join(" ");
 }
 
-// Top nav item with animated underline + hover/press accents
+// Top-nav item with gradient underline on hover
 function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
   return (
     <NavLink
@@ -22,7 +22,15 @@ function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
     >
       <span className="relative">
         {children}
-        <span className="pointer-events-none absolute -bottom-0.5 left-0 right-0 mx-auto h-0.5 w-0 rounded-full bg-slate-900/30 transition-all duration-200 group-hover:w-full" />
+        {/* Gradient underline that animates in on hover */}
+        <span
+          className="
+            pointer-events-none absolute -bottom-0.5 left-0 right-0 mx-auto
+            h-0.5 w-0 rounded-full transition-all duration-200
+            group-hover:w-full
+            bg-gradient-to-r from-yellow-400 via-white to-green-500
+          "
+        />
       </span>
     </NavLink>
   );
@@ -30,49 +38,26 @@ function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
 
 export default function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [dataOpen, setDataOpen] = useState(false); // dropdown (desktop)
-  const btnRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const location = useLocation();
 
-  // Close menus on route change
+  // Close mobile menu on route change
   useEffect(() => {
     setMobileOpen(false);
-    setDataOpen(false);
   }, [location.pathname, location.search]);
-
-  // Close dropdown on outside click / ESC
-  useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (!dataOpen) return;
-      const t = e.target as Node;
-      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) return;
-      setDataOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setDataOpen(false);
-    }
-    document.addEventListener("click", onDocClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("click", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [dataOpen]);
 
   return (
     <div className="min-h-dvh flex flex-col relative">
-      {/* ✨ Soft gradient backdrop (as before) */}
+      {/* 🌈 Soft yellow → white → green background gradient */}
       <div
         aria-hidden
-        className="pointer-events-none fixed inset-0 -z-10 bg-gradient-to-br from-indigo-100 via-white to-emerald-100"
+        className="pointer-events-none fixed inset-0 -z-10 bg-gradient-to-br from-yellow-100 via-white to-green-100"
       />
 
-      {/* Header: translucent + blur + subtle border/shadow (as before) */}
+      {/* Header: translucent + blur, subtle border/shadow */}
       <header className="sticky top-0 z-40 bg-white/70 backdrop-blur supports-[backdrop-filter]:bg-white/70 border-b border-black/10 shadow-sm">
         <div className="mx-auto max-w-6xl px-4">
           <div className="h-14 flex items-center justify-between gap-4">
-            {/* Brand + hamburger */}
+            {/* Left: brand + hamburger */}
             <div className="flex items-center gap-3">
               <button
                 className="sm:hidden inline-flex items-center justify-center rounded p-2 transition hover:bg-black/5 active:scale-[0.98]"
@@ -89,50 +74,20 @@ export default function App() {
               </Link>
             </div>
 
-            {/* Desktop nav */}
+            {/* Desktop nav: all tabs visible */}
             <nav className="hidden sm:flex items-center gap-1">
               <NavItem to="/">Dashboard</NavItem>
               <NavItem to="/setup">Setup</NavItem>
               <NavItem to="/farms">Farms</NavItem>
 
-              {/* Data dropdown (Morts, Weights, Feed Silos, Water, Reminders) */}
-              <div className="relative">
-                <button
-                  ref={btnRef}
-                  type="button"
-                  className={cx(
-                    "group relative px-3 py-2 rounded transition-all",
-                    "hover:bg-black/5 active:scale-[0.98] inline-flex items-center gap-1"
-                  )}
-                  onClick={() => setDataOpen((v) => !v)}
-                  aria-haspopup="menu"
-                  aria-expanded={dataOpen}
-                >
-                  <span className="relative">
-                    Data
-                    <span className="pointer-events-none absolute -bottom-0.5 left-0 right-0 mx-auto h-0.5 w-0 rounded-full bg-slate-900/30 transition-all duration-200 group-hover:w-full" />
-                  </span>
-                  <svg className={cx("h-4 w-4 transition-transform", dataOpen && "rotate-180")} viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.94l3.71-3.71a.75.75 0 1 1 1.06 1.06l-4.24 4.24a.75.75 0 0 1-1.06 0L5.21 8.29a.75.75 0 0 1 .02-1.08Z" />
-                  </svg>
-                </button>
+              {/* Data tabs (no dropdown) */}
+              <NavItem to="/morts">Morts</NavItem>
+              <NavItem to="/weights">Weights</NavItem>
+              <NavItem to="/feed">Feed Silos</NavItem>
+              <NavItem to="/water">Water</NavItem>
+              <NavItem to="/reminders">Reminders</NavItem>
 
-                {dataOpen && (
-                  <div
-                    ref={menuRef}
-                    role="menu"
-                    className="absolute right-0 mt-2 w-48 rounded-md border bg-white shadow-lg p-1 z-50"
-                  >
-                    <MenuItem to="/morts">Morts</MenuItem>
-                    <MenuItem to="/weights">Weights</MenuItem>
-                    <MenuItem to="/feed">Feed Silos</MenuItem>
-                    <MenuItem to="/water">Water</MenuItem>
-                    <MenuItem to="/reminders">Reminders</MenuItem>
-                  </div>
-                )}
-              </div>
-
-              {/* User icon (replaces text “User”) */}
+              {/* User icon tab */}
               <NavLink
                 to="/user"
                 className={({ isActive }) =>
@@ -154,7 +109,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Mobile drawer (with same vibe) */}
+        {/* Mobile drawer */}
         {mobileOpen && (
           <div className="sm:hidden border-t bg-white/90 backdrop-blur animate-fade-slide">
             <div className="mx-auto max-w-6xl px-4 py-2">
@@ -162,16 +117,14 @@ export default function App() {
                 <MobileLink to="/">Dashboard</MobileLink>
                 <MobileLink to="/setup">Setup</MobileLink>
                 <MobileLink to="/farms">Farms</MobileLink>
-                <div className="mt-2">
-                  <div className="px-2 py-1 text-xs uppercase tracking-wide text-slate-500">Data</div>
-                  <div className="mt-1 flex flex-col">
-                    <MobileLink to="/morts">Morts</MobileLink>
-                    <MobileLink to="/weights">Weights</MobileLink>
-                    <MobileLink to="/feed">Feed Silos</MobileLink>
-                    <MobileLink to="/water">Water</MobileLink>
-                    <MobileLink to="/reminders">Reminders</MobileLink>
-                  </div>
-                </div>
+
+                {/* Data tabs (listed) */}
+                <MobileLink to="/morts">Morts</MobileLink>
+                <MobileLink to="/weights">Weights</MobileLink>
+                <MobileLink to="/feed">Feed Silos</MobileLink>
+                <MobileLink to="/water">Water</MobileLink>
+                <MobileLink to="/reminders">Reminders</MobileLink>
+
                 <MobileLink to="/user" icon>
                   <span className="inline-flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
@@ -194,23 +147,6 @@ export default function App() {
         </div>
       </main>
     </div>
-  );
-}
-
-function MenuItem({ to, children }: { to: string; children: React.ReactNode }) {
-  return (
-    <NavLink
-      to={to}
-      className={({ isActive }) =>
-        cx(
-          "block rounded px-3 py-2 text-sm transition",
-          isActive ? "bg-black/5 font-medium" : "hover:bg-black/5"
-        )
-      }
-      role="menuitem"
-    >
-      {children}
-    </NavLink>
   );
 }
 
@@ -239,4 +175,4 @@ function MobileLink({
       {children ?? to}
     </NavLink>
   );
-}
+} 
