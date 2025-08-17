@@ -6,7 +6,7 @@ import App from "./App";
 import "./index.css";
 
 import Dashboard from "./pages/Dashboard";
-import Morts from "./pages/Morts";           // renamed Daily Log
+import Morts from "./pages/Morts";
 import Weights from "./pages/Weights";
 import Water from "./pages/Water";
 import Feed from "./pages/Feed";
@@ -14,7 +14,7 @@ import Setup from "./pages/Setup";
 import User from "./pages/User";
 import Farms from "./pages/Farms";
 import Reminders from "./pages/Reminders";
-import Analytics from "./pages/Analytics";
+// Analytics removed
 
 import { FarmProvider } from "./lib/FarmContext";
 
@@ -37,9 +37,7 @@ const router = createBrowserRouter([
       { path: "/user", element: <User /> },
       { path: "/farms", element: <Farms /> },
 
-      // keep these pages available
       { path: "/reminders", element: <Reminders /> },
-      { path: "/analytics", element: <Analytics /> },
     ],
   },
 ]);
