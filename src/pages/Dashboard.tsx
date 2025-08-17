@@ -31,8 +31,20 @@ function daysBetweenUTC(yyyyMmDdA?: string, yyyyMmDdB?: string) {
   return Math.floor(diffMs / (1000 * 60 * 60 * 24));
 }
 
+// Heuristic: pick whichever path your nav actually links to
+function resolveDailyLogPath(): string {
+  const candidates = ["/daily-log", "/daily-logs"];
+  if (typeof document !== "undefined") {
+    for (const p of candidates) {
+      if (document.querySelector(`a[href="${p}"]`)) return p;
+    }
+  }
+  return "/daily-log"; // sensible default
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
+  const DAILY_LOG_PATH = resolveDailyLogPath();
 
   // Read persisted slices
   const [sheds] = useCloudSlice<Shed[]>("sheds", []);
@@ -40,7 +52,7 @@ export default function Dashboard() {
   const [settings] = useCloudSlice<Settings>("settings", {});
 
   const today = new Date().toISOString().slice(0, 10);
-  const batchLen = Math.max(1, Number(settings.batchLengthDays ?? 42)); // sensible default if unset
+  const batchLen = Math.max(1, Number(settings.batchLengthDays ?? 42)); // default if unset
 
   // Compute per-shed stats (morts + progress)
   const tiles = useMemo(() => {
@@ -75,7 +87,6 @@ export default function Dashboard() {
       };
     });
 
-    // Keep stable order by name
     return list.sort((a, b) => a.name.localeCompare(b.name));
   }, [sheds, dailyLog, batchLen, today]);
 
@@ -85,7 +96,7 @@ export default function Dashboard() {
   }
   function goAddMorts(name: string) {
     const q = new URLSearchParams({ shed: name, focus: "mortalities" });
-    navigate(`/daily-log?${q.toString()}`);
+    navigate(`${DAILY_LOG_PATH}?${q.toString()}`);
   }
 
   return (
