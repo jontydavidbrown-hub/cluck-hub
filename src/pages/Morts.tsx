@@ -6,41 +6,42 @@ import { useSearchParams } from "react-router-dom";
 type Shed = {
   id: string;
   name: string;
-  placementDate?: string;     // YYYY-MM-DD
+  placementDate?: string;      // YYYY-MM-DD
   placementBirds?: number;
   birdsPlaced?: number;
 };
 
 type Row = {
   id: string;
-  date: string;               // YYYY-MM-DD
+  date: string;                // YYYY-MM-DD
   shed?: string;
 
-  // Requested explicit fields
-  morts?: number;             // natural deaths
+  // Explicit fields
+  morts?: number;              // natural deaths
   cullRunts?: number;
   cullLegs?: number;
   cullNonStart?: number;
   cullOther?: number;
 
-  // Compatibility fields used by dashboard
-  culls?: number;             // sum of all cull categories
-  mortalities?: number;       // morts + culls
+  // Compatibility fields used elsewhere
+  culls?: number;              // sum of all cull categories
+  mortalities?: number;        // morts + culls
 
   notes?: string;
 };
 
 function emptyRow(prefillShed = ""): Row {
   const today = new Date().toISOString().slice(0, 10);
+  // NOTE: leave numeric fields undefined so the input shows transparent placeholder (no “0” to delete)
   return {
     id: crypto.randomUUID(),
     date: today,
     shed: prefillShed,
-    morts: 0,
-    cullRunts: 0,
-    cullLegs: 0,
-    cullNonStart: 0,
-    cullOther: 0,
+    morts: undefined,
+    cullRunts: undefined,
+    cullLegs: undefined,
+    cullNonStart: undefined,
+    cullOther: undefined,
     culls: 0,
     mortalities: 0,
     notes: "",
@@ -179,7 +180,7 @@ export default function Morts() {
             <label className="block text-sm mb-1">Date</label>
             <input
               type="date"
-              className="w-full border rounded px-2 py-1"
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
               value={draft.date}
               onChange={(e) => setDraft({ ...draft, date: e.target.value })}
             />
@@ -189,7 +190,7 @@ export default function Morts() {
             <label className="block text-sm mb-1">Shed</label>
             <input
               list="shed-list"
-              className="w-full border rounded px-2 py-1"
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
               placeholder="e.g., Shed 1"
               value={draft.shed ?? ""}
               onChange={(e) => setDraft({ ...draft, shed: e.target.value })}
@@ -206,9 +207,10 @@ export default function Morts() {
             <input
               type="number"
               min={0}
-              className="w-full border rounded px-2 py-1"
-              value={draft.morts ?? 0}
-              onChange={(e) => setDraft({ ...draft, morts: clampNum(e.target.value) })}
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
+              placeholder="0"
+              value={draft.morts === undefined ? "" : draft.morts}
+              onChange={(e) => setDraft({ ...draft, morts: e.target.value === "" ? undefined : clampNum(e.target.value) })}
             />
           </div>
 
@@ -217,9 +219,10 @@ export default function Morts() {
             <input
               type="number"
               min={0}
-              className="w-full border rounded px-2 py-1"
-              value={draft.cullRunts ?? 0}
-              onChange={(e) => setDraft({ ...draft, cullRunts: clampNum(e.target.value) })}
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
+              placeholder="0"
+              value={draft.cullRunts === undefined ? "" : draft.cullRunts}
+              onChange={(e) => setDraft({ ...draft, cullRunts: e.target.value === "" ? undefined : clampNum(e.target.value) })}
             />
           </div>
 
@@ -228,9 +231,10 @@ export default function Morts() {
             <input
               type="number"
               min={0}
-              className="w-full border rounded px-2 py-1"
-              value={draft.cullLegs ?? 0}
-              onChange={(e) => setDraft({ ...draft, cullLegs: clampNum(e.target.value) })}
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
+              placeholder="0"
+              value={draft.cullLegs === undefined ? "" : draft.cullLegs}
+              onChange={(e) => setDraft({ ...draft, cullLegs: e.target.value === "" ? undefined : clampNum(e.target.value) })}
             />
           </div>
 
@@ -239,9 +243,10 @@ export default function Morts() {
             <input
               type="number"
               min={0}
-              className="w-full border rounded px-2 py-1"
-              value={draft.cullNonStart ?? 0}
-              onChange={(e) => setDraft({ ...draft, cullNonStart: clampNum(e.target.value) })}
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
+              placeholder="0"
+              value={draft.cullNonStart === undefined ? "" : draft.cullNonStart}
+              onChange={(e) => setDraft({ ...draft, cullNonStart: e.target.value === "" ? undefined : clampNum(e.target.value) })}
             />
           </div>
 
@@ -250,9 +255,10 @@ export default function Morts() {
             <input
               type="number"
               min={0}
-              className="w-full border rounded px-2 py-1"
-              value={draft.cullOther ?? 0}
-              onChange={(e) => setDraft({ ...draft, cullOther: clampNum(e.target.value) })}
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
+              placeholder="0"
+              value={draft.cullOther === undefined ? "" : draft.cullOther}
+              onChange={(e) => setDraft({ ...draft, cullOther: e.target.value === "" ? undefined : clampNum(e.target.value) })}
             />
           </div>
 
@@ -260,7 +266,8 @@ export default function Morts() {
             <label className="block text-sm mb-1">Notes</label>
             <input
               type="text"
-              className="w-full border rounded px-2 py-1"
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
+              placeholder="Optional notes"
               value={draft.notes ?? ""}
               onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
             />
@@ -294,14 +301,14 @@ export default function Morts() {
             </thead>
             <tbody>
               {sorted.map((r) => {
-                const total = clampNum(r.morts) + sumCulls(r);
+                const total = (Number(r.morts) || 0) + sumCulls(r);
                 return (
                   <tr key={r.id} className="border-b">
                     <td className="py-2 pr-2">
                       {editingId === r.id ? (
                         <input
                           type="date"
-                          className="border rounded px-2 py-1"
+                          className="border rounded px-2 py-1 placeholder-transparent"
                           value={edit?.date || ""}
                           onChange={(e) => setEdit((s) => ({ ...(s as Row), date: e.target.value }))}
                         />
@@ -313,8 +320,9 @@ export default function Morts() {
                       {editingId === r.id ? (
                         <input
                           list="shed-list"
-                          className="border rounded px-2 py-1"
-                          value={edit?.shed || ""}
+                          className="border rounded px-2 py-1 placeholder-transparent"
+                          placeholder="e.g., Shed 1"
+                          value={edit?.shed ?? ""}
                           onChange={(e) => setEdit((s) => ({ ...(s as Row), shed: e.target.value }))}
                         />
                       ) : (
@@ -326,9 +334,10 @@ export default function Morts() {
                         <input
                           type="number"
                           min={0}
-                          className="border rounded px-2 py-1"
-                          value={edit?.morts ?? 0}
-                          onChange={(e) => setEdit((s) => ({ ...(s as Row), morts: clampNum(e.target.value) }))}
+                          className="border rounded px-2 py-1 placeholder-transparent"
+                          placeholder="0"
+                          value={edit?.morts === undefined ? "" : edit?.morts}
+                          onChange={(e) => setEdit((s) => ({ ...(s as Row), morts: e.target.value === "" ? undefined : clampNum(e.target.value) }))}
                         />
                       ) : (
                         r.morts ?? 0
@@ -339,9 +348,10 @@ export default function Morts() {
                         <input
                           type="number"
                           min={0}
-                          className="border rounded px-2 py-1"
-                          value={edit?.cullRunts ?? 0}
-                          onChange={(e) => setEdit((s) => ({ ...(s as Row), cullRunts: clampNum(e.target.value) }))}
+                          className="border rounded px-2 py-1 placeholder-transparent"
+                          placeholder="0"
+                          value={edit?.cullRunts === undefined ? "" : edit?.cullRunts}
+                          onChange={(e) => setEdit((s) => ({ ...(s as Row), cullRunts: e.target.value === "" ? undefined : clampNum(e.target.value) }))}
                         />
                       ) : (
                         r.cullRunts ?? 0
@@ -352,9 +362,10 @@ export default function Morts() {
                         <input
                           type="number"
                           min={0}
-                          className="border rounded px-2 py-1"
-                          value={edit?.cullLegs ?? 0}
-                          onChange={(e) => setEdit((s) => ({ ...(s as Row), cullLegs: clampNum(e.target.value) }))}
+                          className="border rounded px-2 py-1 placeholder-transparent"
+                          placeholder="0"
+                          value={edit?.cullLegs === undefined ? "" : edit?.cullLegs}
+                          onChange={(e) => setEdit((s) => ({ ...(s as Row), cullLegs: e.target.value === "" ? undefined : clampNum(e.target.value) }))}
                         />
                       ) : (
                         r.cullLegs ?? 0
@@ -365,9 +376,10 @@ export default function Morts() {
                         <input
                           type="number"
                           min={0}
-                          className="border rounded px-2 py-1"
-                          value={edit?.cullNonStart ?? 0}
-                          onChange={(e) => setEdit((s) => ({ ...(s as Row), cullNonStart: clampNum(e.target.value) }))}
+                          className="border rounded px-2 py-1 placeholder-transparent"
+                          placeholder="0"
+                          value={edit?.cullNonStart === undefined ? "" : edit?.cullNonStart}
+                          onChange={(e) => setEdit((s) => ({ ...(s as Row), cullNonStart: e.target.value === "" ? undefined : clampNum(e.target.value) }))}
                         />
                       ) : (
                         r.cullNonStart ?? 0
@@ -378,9 +390,10 @@ export default function Morts() {
                         <input
                           type="number"
                           min={0}
-                          className="border rounded px-2 py-1"
-                          value={edit?.cullOther ?? 0}
-                          onChange={(e) => setEdit((s) => ({ ...(s as Row), cullOther: clampNum(e.target.value) }))}
+                          className="border rounded px-2 py-1 placeholder-transparent"
+                          placeholder="0"
+                          value={edit?.cullOther === undefined ? "" : edit?.cullOther}
+                          onChange={(e) => setEdit((s) => ({ ...(s as Row), cullOther: e.target.value === "" ? undefined : clampNum(e.target.value) }))}
                         />
                       ) : (
                         r.cullOther ?? 0
@@ -390,8 +403,9 @@ export default function Morts() {
                     <td className="py-2 pr-2">
                       {editingId === r.id ? (
                         <input
-                          className="border rounded px-2 py-1"
-                          value={edit?.notes || ""}
+                          className="border rounded px-2 py-1 placeholder-transparent"
+                          placeholder="Optional notes"
+                          value={edit?.notes ?? ""}
                           onChange={(e) => setEdit((s) => ({ ...(s as Row), notes: e.target.value }))}
                         />
                       ) : (
@@ -447,7 +461,6 @@ export default function Morts() {
       <div className="space-y-4">
         {[...byShed.entries()].map(([shedName, list]) => {
           const placement = placementByShed.get(shedName);
-          // Show newest first in the breakdown
           const rowsDesc = [...list].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
           return (
@@ -470,7 +483,7 @@ export default function Morts() {
                   <tbody>
                     {rowsDesc.map((r) => {
                       const age = placement ? daysBetweenUTC(placement, r.date) : undefined;
-                      const total = clampNum(r.morts) + sumCulls(r);
+                      const total = (Number(r.morts) || 0) + sumCulls(r);
                       return (
                         <tr key={r.id} className="border-b">
                           <td className="py-2 pr-2">{r.date}</td>
