@@ -26,17 +26,14 @@ type Row = {
   // Compatibility fields used elsewhere
   culls?: number;              // sum of all cull categories
   mortalities?: number;        // morts + culls
-
-  notes?: string;
 };
 
-function emptyRow(prefillShed = ""): Row {
+function emptyRow(): Row {
   const today = new Date().toISOString().slice(0, 10);
-  // NOTE: leave numeric fields undefined so the input shows transparent placeholder (no “0” to delete)
   return {
     id: crypto.randomUUID(),
     date: today,
-    shed: prefillShed,
+    // leave numbers undefined so inputs show transparent placeholders
     morts: undefined,
     cullRunts: undefined,
     cullLegs: undefined,
@@ -44,7 +41,6 @@ function emptyRow(prefillShed = ""): Row {
     cullOther: undefined,
     culls: 0,
     mortalities: 0,
-    notes: "",
   };
 }
 
@@ -72,35 +68,20 @@ export default function Morts() {
   const [rows, setRows] = useCloudSlice<Row[]>("dailyLog", []);
   const [sheds] = useCloudSlice<Shed[]>("sheds", []);
 
-  const [draft, setDraft] = useState<Row>(emptyRow(preselectShed));
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [edit, setEdit] = useState<Row | null>(null);
-
-  // Keep shed list stable by name for selects
+  // --- Top-level Shed selection (big box) ---
   const shedNames = useMemo(
     () => (sheds || []).map(s => s.name || "").filter(Boolean).sort((a, b) => a.localeCompare(b)),
     [sheds]
   );
 
-  // Sorted global view (by date asc, then shed)
-  const sorted = useMemo(
-    () =>
-      [...(rows || [])].sort((a, b) =>
-        (a.date || "").localeCompare(b.date || "") || (a.shed || "").localeCompare(b.shed || "")
-      ),
-    [rows]
-  );
+  const [selectedShed, setSelectedShed] = useState<string>("");
 
-  // Group rows by shed for breakdown
-  const byShed = useMemo(() => {
-    const m = new Map<string, Row[]>();
-    for (const r of sorted) {
-      const key = (r.shed || "").trim() || "(No shed)";
-      if (!m.has(key)) m.set(key, []);
-      m.get(key)!.push(r);
-    }
-    return m;
-  }, [sorted]);
+  // Initialize selected shed from URL or first available
+  useEffect(() => {
+    if (selectedShed) return;
+    if (preselectShed) setSelectedShed(preselectShed);
+    else if (shedNames.length) setSelectedShed(shedNames[0]);
+  }, [preselectShed, shedNames, selectedShed]);
 
   // Lookup placementDate for day age
   const placementByShed = useMemo(() => {
@@ -112,12 +93,26 @@ export default function Morts() {
     return m;
   }, [sheds]);
 
+  // Filtered, sorted entries for the selected shed
+  const shedRows = useMemo(() => {
+    const list = (rows || []).filter(r => (r.shed || "") === (selectedShed || ""));
+    return list.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  }, [rows, selectedShed]);
+
+  // Draft row (shed taken from selectedShed)
+  const [draft, setDraft] = useState<Row>(emptyRow());
+
+  // If shed changes, keep draft but its shed will be applied only when saving
   useEffect(() => {
-    // If URL preselects shed and draft is empty, apply once
-    if (preselectShed && !draft.shed) {
-      setDraft(d => ({ ...d, shed: preselectShed }));
-    }
-  }, [preselectShed]); // eslint-disable-line react-hooks/exhaustive-deps
+    // keep date; reset numbers to undefined so placeholders appear for new shed entry
+    setDraft(d => ({
+      ...emptyRow(),
+      date: d.date || new Date().toISOString().slice(0, 10),
+    }));
+  }, [selectedShed]);
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [edit, setEdit] = useState<Row | null>(null);
 
   // ---- CRUD helpers
   function normalize(r: Row): Row {
@@ -141,14 +136,24 @@ export default function Morts() {
   }
 
   function addRow() {
-    if (!draft.date) return;
-    const cleaned = normalize(draft);
+    if (!draft.date || !selectedShed) return;
+    const cleaned = normalize({
+      ...draft,
+      shed: selectedShed,
+      // Ensure undefined numeric fields become 0 on save
+      morts: draft.morts ?? 0,
+      cullRunts: draft.cullRunts ?? 0,
+      cullLegs: draft.cullLegs ?? 0,
+      cullNonStart: draft.cullNonStart ?? 0,
+      cullOther: draft.cullOther ?? 0,
+    });
     setRows([...(rows || []), cleaned]);
-    setDraft(emptyRow(preselectShed));
+    setDraft(emptyRow());
   }
 
   function startEdit(r: Row) {
     setEditingId(r.id);
+    // In this table we edit only numbers; date remains part of the entry but is hidden.
     setEdit({ ...r });
   }
 
@@ -172,10 +177,30 @@ export default function Morts() {
         <h1 className="text-2xl font-semibold">Morts</h1>
       </div>
 
-      {/* Add form */}
+      {/* Top Shed Number selector */}
+      <div className="p-4 border rounded-2xl bg-white">
+        <label className="block text-sm mb-1">Shed Number</label>
+        {shedNames.length > 0 ? (
+          <select
+            className="w-full md:max-w-sm border rounded-lg px-3 py-2 text-base"
+            value={selectedShed}
+            onChange={(e) => setSelectedShed(e.target.value)}
+          >
+            {shedNames.map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+        ) : (
+          <div className="text-sm text-slate-600">
+            No sheds configured. Add sheds in <span className="font-medium">Setup</span>.
+          </div>
+        )}
+      </div>
+
+      {/* Add form (no shed input, no notes) */}
       <div className="p-4 border rounded-2xl bg-white">
         <div className="font-medium mb-3">Add entry</div>
-        <div className="grid md:grid-cols-8 gap-3">
+        <div className="grid md:grid-cols-6 gap-3">
           <div>
             <label className="block text-sm mb-1">Date</label>
             <input
@@ -186,27 +211,11 @@ export default function Morts() {
             />
           </div>
 
-          <div className="md:col-span-2">
-            <label className="block text-sm mb-1">Shed</label>
-            <input
-              list="shed-list"
-              className="w-full border rounded px-2 py-1 placeholder-transparent"
-              placeholder="e.g., Shed 1"
-              value={draft.shed ?? ""}
-              onChange={(e) => setDraft({ ...draft, shed: e.target.value })}
-            />
-            <datalist id="shed-list">
-              {shedNames.map((n) => (
-                <option key={n} value={n} />
-              ))}
-            </datalist>
-          </div>
-
+          {/* Numeric inputs with transparent placeholders */}
           <div>
             <label className="block text-sm mb-1">Morts</label>
             <input
-              type="number"
-              min={0}
+              type="number" min={0}
               className="w-full border rounded px-2 py-1 placeholder-transparent"
               placeholder="0"
               value={draft.morts === undefined ? "" : draft.morts}
@@ -217,8 +226,7 @@ export default function Morts() {
           <div>
             <label className="block text-sm mb-1">Cull Runts</label>
             <input
-              type="number"
-              min={0}
+              type="number" min={0}
               className="w-full border rounded px-2 py-1 placeholder-transparent"
               placeholder="0"
               value={draft.cullRunts === undefined ? "" : draft.cullRunts}
@@ -229,8 +237,7 @@ export default function Morts() {
           <div>
             <label className="block text-sm mb-1">Cull Legs</label>
             <input
-              type="number"
-              min={0}
+              type="number" min={0}
               className="w-full border rounded px-2 py-1 placeholder-transparent"
               placeholder="0"
               value={draft.cullLegs === undefined ? "" : draft.cullLegs}
@@ -241,8 +248,7 @@ export default function Morts() {
           <div>
             <label className="block text-sm mb-1">Cull Non-Start</label>
             <input
-              type="number"
-              min={0}
+              type="number" min={0}
               className="w-full border rounded px-2 py-1 placeholder-transparent"
               placeholder="0"
               value={draft.cullNonStart === undefined ? "" : draft.cullNonStart}
@@ -253,87 +259,58 @@ export default function Morts() {
           <div>
             <label className="block text-sm mb-1">Cull Other</label>
             <input
-              type="number"
-              min={0}
+              type="number" min={0}
               className="w-full border rounded px-2 py-1 placeholder-transparent"
               placeholder="0"
               value={draft.cullOther === undefined ? "" : draft.cullOther}
               onChange={(e) => setDraft({ ...draft, cullOther: e.target.value === "" ? undefined : clampNum(e.target.value) })}
             />
           </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm mb-1">Notes</label>
-            <input
-              type="text"
-              className="w-full border rounded px-2 py-1 placeholder-transparent"
-              placeholder="Optional notes"
-              value={draft.notes ?? ""}
-              onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
-            />
-          </div>
         </div>
 
         <div className="mt-3">
-          <button className="px-4 py-2 rounded bg-black text-white" onClick={addRow}>
+          <button
+            className="px-4 py-2 rounded bg-black text-white disabled:opacity-50"
+            onClick={addRow}
+            disabled={!selectedShed}
+          >
             Add
           </button>
         </div>
       </div>
 
-      {/* Main table */}
+      {/* Single saved-entries table for the selected shed (no date column, shows Day Age; editable & removable) */}
       <div className="p-4 border rounded-2xl bg-white">
+        <div className="font-medium mb-3">Breakdown — {selectedShed || "No shed selected"}</div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left border-b">
-                <th className="py-2 pr-2">Date</th>
-                <th className="py-2 pr-2">Shed</th>
+                <th className="py-2 pr-2">Day Age</th>
                 <th className="py-2 pr-2">Morts</th>
                 <th className="py-2 pr-2">Cull Runts</th>
                 <th className="py-2 pr-2">Cull Legs</th>
                 <th className="py-2 pr-2">Cull Non-Start</th>
                 <th className="py-2 pr-2">Cull Other</th>
                 <th className="py-2 pr-2">Total</th>
-                <th className="py-2 pr-2">Notes</th>
                 <th className="py-2 pr-2">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {sorted.map((r) => {
+              {shedRows.map((r) => {
+                const placement = placementByShed.get(selectedShed || "");
+                const age = placement ? daysBetweenUTC(placement, r.date) : undefined;
                 const total = (Number(r.morts) || 0) + sumCulls(r);
+                const isEditing = editingId === r.id;
+
                 return (
                   <tr key={r.id} className="border-b">
+                    <td className="py-2 pr-2">{typeof age === "number" ? age : "—"}</td>
+
                     <td className="py-2 pr-2">
-                      {editingId === r.id ? (
+                      {isEditing ? (
                         <input
-                          type="date"
-                          className="border rounded px-2 py-1 placeholder-transparent"
-                          value={edit?.date || ""}
-                          onChange={(e) => setEdit((s) => ({ ...(s as Row), date: e.target.value }))}
-                        />
-                      ) : (
-                        r.date
-                      )}
-                    </td>
-                    <td className="py-2 pr-2">
-                      {editingId === r.id ? (
-                        <input
-                          list="shed-list"
-                          className="border rounded px-2 py-1 placeholder-transparent"
-                          placeholder="e.g., Shed 1"
-                          value={edit?.shed ?? ""}
-                          onChange={(e) => setEdit((s) => ({ ...(s as Row), shed: e.target.value }))}
-                        />
-                      ) : (
-                        r.shed || ""
-                      )}
-                    </td>
-                    <td className="py-2 pr-2">
-                      {editingId === r.id ? (
-                        <input
-                          type="number"
-                          min={0}
+                          type="number" min={0}
                           className="border rounded px-2 py-1 placeholder-transparent"
                           placeholder="0"
                           value={edit?.morts === undefined ? "" : edit?.morts}
@@ -343,11 +320,11 @@ export default function Morts() {
                         r.morts ?? 0
                       )}
                     </td>
+
                     <td className="py-2 pr-2">
-                      {editingId === r.id ? (
+                      {isEditing ? (
                         <input
-                          type="number"
-                          min={0}
+                          type="number" min={0}
                           className="border rounded px-2 py-1 placeholder-transparent"
                           placeholder="0"
                           value={edit?.cullRunts === undefined ? "" : edit?.cullRunts}
@@ -357,11 +334,11 @@ export default function Morts() {
                         r.cullRunts ?? 0
                       )}
                     </td>
+
                     <td className="py-2 pr-2">
-                      {editingId === r.id ? (
+                      {isEditing ? (
                         <input
-                          type="number"
-                          min={0}
+                          type="number" min={0}
                           className="border rounded px-2 py-1 placeholder-transparent"
                           placeholder="0"
                           value={edit?.cullLegs === undefined ? "" : edit?.cullLegs}
@@ -371,11 +348,11 @@ export default function Morts() {
                         r.cullLegs ?? 0
                       )}
                     </td>
+
                     <td className="py-2 pr-2">
-                      {editingId === r.id ? (
+                      {isEditing ? (
                         <input
-                          type="number"
-                          min={0}
+                          type="number" min={0}
                           className="border rounded px-2 py-1 placeholder-transparent"
                           placeholder="0"
                           value={edit?.cullNonStart === undefined ? "" : edit?.cullNonStart}
@@ -385,11 +362,11 @@ export default function Morts() {
                         r.cullNonStart ?? 0
                       )}
                     </td>
+
                     <td className="py-2 pr-2">
-                      {editingId === r.id ? (
+                      {isEditing ? (
                         <input
-                          type="number"
-                          min={0}
+                          type="number" min={0}
                           className="border rounded px-2 py-1 placeholder-transparent"
                           placeholder="0"
                           value={edit?.cullOther === undefined ? "" : edit?.cullOther}
@@ -399,21 +376,11 @@ export default function Morts() {
                         r.cullOther ?? 0
                       )}
                     </td>
+
                     <td className="py-2 pr-2">{total}</td>
+
                     <td className="py-2 pr-2">
-                      {editingId === r.id ? (
-                        <input
-                          className="border rounded px-2 py-1 placeholder-transparent"
-                          placeholder="Optional notes"
-                          value={edit?.notes ?? ""}
-                          onChange={(e) => setEdit((s) => ({ ...(s as Row), notes: e.target.value }))}
-                        />
-                      ) : (
-                        r.notes || ""
-                      )}
-                    </td>
-                    <td className="py-2 pr-2">
-                      {editingId === r.id ? (
+                      {isEditing ? (
                         <div className="flex gap-2">
                           <button className="px-2 py-1 border rounded" onClick={saveEdit}>
                             Save
@@ -445,10 +412,10 @@ export default function Morts() {
                   </tr>
                 );
               })}
-              {sorted.length === 0 && (
+              {shedRows.length === 0 && (
                 <tr>
-                  <td className="py-6 text-gray-500" colSpan={10}>
-                    No entries yet.
+                  <td className="py-6 text-gray-500" colSpan={8}>
+                    No entries for this shed.
                   </td>
                 </tr>
               )}
@@ -457,60 +424,7 @@ export default function Morts() {
         </div>
       </div>
 
-      {/* Per-shed breakdown */}
-      <div className="space-y-4">
-        {[...byShed.entries()].map(([shedName, list]) => {
-          const placement = placementByShed.get(shedName);
-          const rowsDesc = [...list].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-
-          return (
-            <div key={shedName} className="p-4 border rounded-2xl bg-white">
-              <div className="font-medium mb-3">Breakdown — {shedName}</div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left border-b">
-                      <th className="py-2 pr-2">Date</th>
-                      <th className="py-2 pr-2">Day Age</th>
-                      <th className="py-2 pr-2">Morts</th>
-                      <th className="py-2 pr-2">Cull Runts</th>
-                      <th className="py-2 pr-2">Cull Legs</th>
-                      <th className="py-2 pr-2">Cull Non-Start</th>
-                      <th className="py-2 pr-2">Cull Other</th>
-                      <th className="py-2 pr-2">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rowsDesc.map((r) => {
-                      const age = placement ? daysBetweenUTC(placement, r.date) : undefined;
-                      const total = (Number(r.morts) || 0) + sumCulls(r);
-                      return (
-                        <tr key={r.id} className="border-b">
-                          <td className="py-2 pr-2">{r.date}</td>
-                          <td className="py-2 pr-2">{typeof age === "number" ? age : "—"}</td>
-                          <td className="py-2 pr-2">{r.morts ?? 0}</td>
-                          <td className="py-2 pr-2">{r.cullRunts ?? 0}</td>
-                          <td className="py-2 pr-2">{r.cullLegs ?? 0}</td>
-                          <td className="py-2 pr-2">{r.cullNonStart ?? 0}</td>
-                          <td className="py-2 pr-2">{r.cullOther ?? 0}</td>
-                          <td className="py-2 pr-2">{total}</td>
-                        </tr>
-                      );
-                    })}
-                    {rowsDesc.length === 0 && (
-                      <tr>
-                        <td className="py-4 text-gray-500" colSpan={8}>
-                          No entries.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {/* (Removed) second per-shed breakdown section */}
     </div>
   );
 }
