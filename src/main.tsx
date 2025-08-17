@@ -10,7 +10,8 @@ import Water from "./pages/Water";
 import Feed from "./pages/Feed";
 import Setup from "./pages/Setup";
 import User from "./pages/User";
-import Farms from "./pages/Farms"; // NEW
+import Farms from "./pages/Farms"; // Farms page (includes Members)
+import { FarmProvider } from "./lib/FarmContext"; // ✅ wrap the whole app
 
 const router = createBrowserRouter([
   {
@@ -18,20 +19,23 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       { index: true, element: <Dashboard /> },
-      { path: "/daily-log", element: <DailyLog /> },
+      { path: "/daily-log", element: <DailyLog /> }, // keep your existing path
       { path: "/weights", element: <Weights /> },
       { path: "/water", element: <Water /> },
       { path: "/feed", element: <Feed /> },
       { path: "/setup", element: <Setup /> },
       { path: "/user", element: <User /> },
-      { path: "/farms", element: <Farms /> }, // NEW
-      // { path: "/members", element: <Members /> }, // REMOVED
+      { path: "/farms", element: <Farms /> },        // new combined page
+      // { path: "/members", element: <Members /> },  // removed
     ],
   },
 ]);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <RouterProvider router={router} />
+    {/* ✅ Ensure every route is inside the Farm context */}
+    <FarmProvider>
+      <RouterProvider router={router} />
+    </FarmProvider>
   </React.StrictMode>
 );
