@@ -68,8 +68,12 @@ export default function Water() {
           </div>
           <div>
             <label className="block text-sm mb-1">Chlorine (ppm)</label>
-            <input type="number" step="0.01" className="w-full border rounded px-2 py-1"
-              value={draft.ppm} onChange={e => setDraft({ ...draft, ppm: Number(e.target.value) })} />
+            <input
+              type="number"
+              className="… placeholder-transparent"
+              placeholder="0"
+              … />
+
           </div>
           <div className="md:col-span-2">
             <label className="block text-sm mb-1">Notes</label>
