@@ -1,3 +1,4 @@
+// src/pages/Dashboard.tsx
 import { useMemo } from "react";
 import { useCloudSlice } from "../lib/cloudSlice";
 import { useNavigate } from "react-router-dom";
@@ -69,7 +70,7 @@ export default function Dashboard() {
         const placed = Number(s.birdsPlaced ?? s.placementBirds) || 0;
         const liveBirds = Math.max(0, placed - mortsTotal);
 
-        // 🔗 Ross 308 estimate for today's feed, kg/day
+        // Ross 308 estimate for today's feed (kg/day)
         const feedKgToday = s.placementDate ? estimateShedFeedKgToday(ageDays, liveBirds) : 0;
 
         return {
@@ -79,7 +80,8 @@ export default function Dashboard() {
           birdsPlaced: placed || undefined,
           progressPct,
           mortsTotal,
-          feedKgToday,
+          feedKgToday,                // kg/day
+          ageDays: s.placementDate ? ageDays : undefined,
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -92,7 +94,6 @@ export default function Dashboard() {
 
   function goAddMorts(name: string) {
     const q = new URLSearchParams({ shed: name, focus: "mortalities" });
-    // prefer /morts (your header uses it)
     navigate(`/morts?${q.toString()}`);
   }
 
@@ -126,25 +127,40 @@ export default function Dashboard() {
                 Batch progress: <span className="font-medium">{t.progressPct}%</span>
               </div>
 
+              {/* Boxes — same styling, new ones added */}
               <div className="grid grid-cols-2 gap-3 text-sm">
+                {/* 1) Day Age (first) */}
+                <div className="rounded border p-2">
+                  <div className="text-xs text-slate-500">Day Age</div>
+                  <div className="text-lg font-semibold">
+                    {typeof t.ageDays === "number" ? t.ageDays : "—"}
+                  </div>
+                </div>
+
+                {/* 2) Birds placed (unchanged) */}
                 <div className="rounded border p-2">
                   <div className="text-xs text-slate-500">Birds placed</div>
                   <div className="text-lg font-semibold">{t.birdsPlaced ?? "—"}</div>
                 </div>
+
+                {/* 3) Morts (total) (unchanged) */}
                 <div className="rounded border p-2">
                   <div className="text-xs text-slate-500">Morts (total)</div>
                   <div className="text-lg font-semibold">{t.mortsTotal}</div>
                 </div>
-              </div>
 
-              {/* ✅ New: simple text line, no layout change */}
-              <div className="text-sm text-slate-700">
-                Est. feed today:{" "}
-                <span className="font-medium">
-                  {t.feedKgToday > 0
-                    ? `${t.feedKgToday.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`
-                    : "—"}
-                </span>
+                {/* 4) Est. feed today in tonnes (one decimal) */}
+                <div className="rounded border p-2">
+                  <div className="text-xs text-slate-500">Est. feed today</div>
+                  <div className="text-lg font-semibold">
+                    {t.feedKgToday > 0
+                      ? `${(t.feedKgToday / 1000).toLocaleString(undefined, {
+                          minimumFractionDigits: 1,
+                          maximumFractionDigits: 1,
+                        })} t`
+                      : "—"}
+                  </div>
+                </div>
               </div>
 
               <div className="mt-1 flex gap-2">
