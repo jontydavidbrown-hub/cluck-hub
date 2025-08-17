@@ -4,7 +4,6 @@ import { useCloudSlice } from "../lib/cloudSlice";
 import Members from "./Members";
 
 export default function Farms() {
-  // Use your existing FarmContext for create/switch; global slices for cross-device sync
   const { farms = [], farmId, setFarmId, createFarm } = useFarm() as any;
 
   const [globalFarms, setGlobalFarms] = useCloudSlice<any[]>("farms", [], { scope: "global" });
@@ -17,7 +16,6 @@ export default function Farms() {
     [farmsForUI]
   );
 
-  // Keep selected farm in sync both ways (context ↔ global)
   useEffect(() => {
     if (farmId !== globalSelectedFarmId) {
       const next = farmId ?? globalSelectedFarmId ?? null;
@@ -30,15 +28,15 @@ export default function Farms() {
   const currentSelected =
     (globalSelectedFarmId ?? farmId ?? (farmsSorted[0]?.id ?? "")) as string;
 
-  // Create / Delete farm (same behavior as in User page)
   const [newName, setNewName] = useState("");
   async function onCreateFarm() {
     const name = newName.trim();
     if (!name) return;
     await createFarm?.(name);
-    setGlobalFarms(prev => [...(prev || []), { id: Date.now().toString(36), name }]); // nudge global list
+    // ❌ removed the extra setGlobalFarms(...) nudge that caused duplicates
     setNewName("");
   }
+
   function onDeleteFarm(id: string) {
     const name = (farmsSorted.find(f => f.id === id)?.name || "this farm");
     if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
@@ -55,7 +53,6 @@ export default function Farms() {
     <div className="animate-fade-slide space-y-6">
       <h1 className="text-2xl font-semibold">Farms</h1>
 
-      {/* Farm management (moved from User) */}
       <div className="card p-4 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h2 className="text-lg font-semibold">Farm Management</h2>
@@ -137,7 +134,6 @@ export default function Farms() {
         </div>
       </div>
 
-      {/* Members page content inlined here */}
       <div className="card p-4">
         <h2 className="text-lg font-semibold mb-2">Members</h2>
         <Members />
