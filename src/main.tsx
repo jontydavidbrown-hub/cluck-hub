@@ -9,7 +9,7 @@ import { FarmProvider } from "./lib/FarmContext"; // ⬅️ make sure this named
 import Dashboard from "./pages/Dashboard";
 import DailyLog from "./pages/DailyLog";
 import Weights from "./pages/Weights";
-import Feed from "./pages/Feed";           // ensure path/case matches actual file
+import Feed from "./pages/FeedSilos";           // ensure path/case matches actual file
 import Water from "./pages/Water";
 import Reminders from "./pages/Reminders";
 import Setup from "./pages/Setup";
