@@ -120,8 +120,8 @@ export default function Dashboard() {
     <div className="p-4 space-y-6">
       <h1 className="text-2xl font-semibold">Dashboard</h1>
 
-      {/* Totals bar */}
-      <div className="grid sm:grid-cols-4 gap-4">
+      {/* Totals bar: 2 per row on mobile, 4 per row from sm+ */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="rounded border p-4 bg-white">
           <div className="text-xs text-slate-500">Total Placed Birds</div>
           <div className="text-2xl font-semibold">
@@ -178,7 +178,6 @@ export default function Dashboard() {
                 Batch progress: <span className="font-medium">{t.progressPct}%</span>
               </div>
 
-              {/* Boxes inside shed tile */}
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="rounded border p-2">
                   <div className="text-xs text-slate-500">Day Age</div>
