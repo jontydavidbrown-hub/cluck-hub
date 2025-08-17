@@ -4,18 +4,20 @@ import { useFarm } from "./lib/FarmContext";
 import { useServerState } from "./lib/serverState";
 import { login, signup, me } from "./lib/session";
 
-/** Inline login lightbox (modal) */
+/** Inline login lightbox (modal) — uses serverState for the `user` slice */
 function LoginLightboxInline() {
-  const { state: user, setState: setUser } = useServerState<{ email: string } | null>("user", null);
+  const { state: user, setState: setUser } =
+    useServerState<{ email: string } | null>("user", null);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checked, setChecked] = useState(false); // <- ensures we decide visibility after /me
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
-  // ✅ Run once on mount only (prevents infinite /auth?action=me loops)
+  // Run once on mount: check current session and then mark as checked
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -24,13 +26,12 @@ function LoginLightboxInline() {
         if (!cancelled) setUser(u?.email ? u : null);
       } catch {
         if (!cancelled) setUser(null);
+      } finally {
+        if (!cancelled) setChecked(true);
       }
     })();
     return () => { cancelled = true; };
-  }, []); // ← IMPORTANT: empty deps
-
-  const visible = !user?.email;
-  if (!visible) return null;
+  }, []); // do not depend on setUser to avoid loops
 
   const emailOk = /\S+@\S+\.\S+/.test(email);
   const passOk = password.length >= 6;
@@ -71,6 +72,10 @@ function LoginLightboxInline() {
       setBusy(false);
     }
   }
+
+  // Only show the modal once we've checked the session and the user is not signed in
+  const visible = checked && !user?.email;
+  if (!visible) return null;
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true">
@@ -198,14 +203,7 @@ function NavItem({ to, children }: { to: string; children: any }) {
 }
 
 /** Mobile drawer navigation */
-function MobileDrawer({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
-  // prevent body scroll when open
+function MobileDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   useEffect(() => {
     try {
       if (open) {
@@ -239,7 +237,6 @@ function MobileDrawer({
 
   return (
     <>
-      {/* overlay */}
       <div
         className={[
           "fixed inset-0 z-[8000] bg-black/30 backdrop-blur-sm transition-opacity md:hidden",
@@ -248,7 +245,6 @@ function MobileDrawer({
         onClick={onClose}
         aria-hidden
       />
-      {/* panel */}
       <aside
         className={[
           "fixed top-0 left-0 z-[8050] h-full w-72 bg-white shadow-xl md:hidden transition-transform",
@@ -310,14 +306,12 @@ export default function App() {
       <header className="sticky top-0 z-40 backdrop-blur supports-[backdrop-filter]:bg-white/60 bg-white/80 border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="h-16 flex items-center justify-between">
-            {/* Left: mobile burger + brand */}
             <div className="flex items-center gap-2">
               <button
                 className="md:hidden rounded-lg p-2 hover:bg-slate-100"
                 aria-label="Open menu"
                 onClick={() => setMobileOpen(true)}
               >
-                {/* simple burger icon */}
                 <span className="block w-5 h-0.5 bg-slate-800 mb-1"></span>
                 <span className="block w-5 h-0.5 bg-slate-800 mb-1"></span>
                 <span className="block w-5 h-0.5 bg-slate-800"></span>
@@ -325,7 +319,6 @@ export default function App() {
               <Brand />
             </div>
 
-            {/* Desktop nav */}
             <nav className="hidden md:flex items-center gap-1 text-sm">
               <NavItem to="/">Dashboard</NavItem>
               <NavItem to="/daily">Daily Log</NavItem>
@@ -339,7 +332,6 @@ export default function App() {
               <NavItem to="/user">User</NavItem>
             </nav>
 
-            {/* Right: farm selector */}
             <HeaderFarmSelector />
           </div>
         </div>
@@ -347,14 +339,12 @@ export default function App() {
 
       <main className="relative">
         <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-          {/* Route transition wrapper (UI-only, no logic change) */}
           <div key={routeKey} className="animate-fade-slide">
             <Outlet />
           </div>
         </div>
       </main>
 
-      {/* Mobile drawer */}
       <MobileDrawer open={mobileOpen} onClose={() => setMobileOpen(false)} />
 
       {/* Global login lightbox */}
