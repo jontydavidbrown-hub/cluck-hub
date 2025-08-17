@@ -8,7 +8,7 @@ import App from "./App";
 import Dashboard from "./pages/Dashboard";
 import DailyLog from "./pages/DailyLog";
 import Weights from "./pages/Weights";
-import Feed from "./pages/Feed";
+import Feed from "./pages/FeedSilos";
 import Water from "./pages/Water";
 import Reminders from "./pages/Reminders";
 import Setup from "./pages/Setup";
