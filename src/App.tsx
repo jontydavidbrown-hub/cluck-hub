@@ -1,43 +1,72 @@
 // src/App.tsx
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import DataMenu from "./components/DataMenu";
 
 function cx(...classes: (string | false | null | undefined)[]) {
   return classes.filter(Boolean).join(" ");
 }
 
+// Reusable top-nav item with animated underline (matches your original vibe)
+function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
+  return (
+    <NavLink
+      to={to}
+      className={({ isActive }) =>
+        cx(
+          "group relative px-3 py-2 rounded transition-all",
+          "hover:bg-black/5 active:scale-[0.98]",
+          isActive && "bg-black/5 font-medium"
+        )
+      }
+      end={to === "/"}
+    >
+      <span className="relative">
+        {children}
+        <span className="pointer-events-none absolute -bottom-0.5 left-0 right-0 mx-auto h-0.5 w-0 rounded-full bg-slate-900/30 transition-all duration-200 group-hover:w-full" />
+      </span>
+    </NavLink>
+  );
+}
+
 export default function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [dataOpen, setDataOpen] = useState(false); // desktop dropdown
   const location = useLocation();
 
-  // Close mobile menu on route change
+  // Close menus on route change
   useEffect(() => {
     setMobileOpen(false);
+    setDataOpen(false);
   }, [location.pathname, location.search]);
+
+  // Close Data dropdown on outside click / ESC
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setDataOpen(false);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div className="min-h-dvh flex flex-col relative">
-      {/* ✨ Soft gradient background (behind everything) */}
+      {/* Gradient background behind app (restores the colored backdrop) */}
       <div
         aria-hidden
-        className="pointer-events-none fixed inset-0 -z-10
-                   bg-gradient-to-br from-indigo-100 via-white to-emerald-100"
+        className="pointer-events-none fixed inset-0 -z-10 bg-gradient-to-br from-indigo-100 via-white to-emerald-100"
       />
 
-      {/* Header: translucent + blur, subtle border + shadow */}
+      {/* Header: translucent + blur with subtle border/shadow */}
       <header className="sticky top-0 z-40 bg-white/70 backdrop-blur supports-[backdrop-filter]:bg-white/70 border-b border-black/10 shadow-sm">
         <div className="mx-auto max-w-6xl px-4">
           <div className="h-14 flex items-center justify-between gap-4">
             {/* Left: brand + hamburger */}
             <div className="flex items-center gap-3">
               <button
-                className="sm:hidden inline-flex items-center justify-center rounded p-2 transition
-                           hover:bg-black/5 active:scale-[0.98]"
+                className="sm:hidden inline-flex items-center justify-center rounded p-2 transition hover:bg-black/5 active:scale-[0.98]"
                 aria-label="Open menu"
                 onClick={() => setMobileOpen((v) => !v)}
               >
-                {/* hamburger */}
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
                 </svg>
@@ -49,13 +78,46 @@ export default function App() {
             </div>
 
             {/* Desktop nav */}
-            <nav className="hidden sm:flex items-center gap-2">
-              <TopNavLink to="/">Dashboard</TopNavLink>
-              <TopNavLink to="/setup">Setup</TopNavLink>
-              <TopNavLink to="/farms">Farms</TopNavLink>
+            <nav className="hidden sm:flex items-center gap-1">
+              <NavItem to="/">Dashboard</NavItem>
+              <NavItem to="/setup">Setup</NavItem>
+              <NavItem to="/farms">Farms</NavItem>
 
               {/* Data dropdown (Morts, Weights, Feed Silos, Water, Reminders) */}
-              <DataMenu />
+              <div className="relative">
+                <button
+                  type="button"
+                  className={cx(
+                    "group relative px-3 py-2 rounded transition-all",
+                    "hover:bg-black/5 active:scale-[0.98] inline-flex items-center gap-1"
+                  )}
+                  onClick={() => setDataOpen((v) => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={dataOpen}
+                >
+                  <span className="relative">
+                    Data
+                    <span className="pointer-events-none absolute -bottom-0.5 left-0 right-0 mx-auto h-0.5 w-0 rounded-full bg-slate-900/30 transition-all duration-200 group-hover:w-full" />
+                  </span>
+                  <svg className={cx("h-4 w-4 transition-transform", dataOpen && "rotate-180")} viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.94l3.71-3.71a.75.75 0 1 1 1.06 1.06l-4.24 4.24a.75.75 0 0 1-1.06 0L5.21 8.29a.75.75 0 0 1 .02-1.08Z" />
+                  </svg>
+                </button>
+
+                {dataOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 mt-2 w-48 rounded-md border bg-white shadow-lg p-1 z-50"
+                    onMouseLeave={() => setDataOpen(false)}
+                  >
+                    <MenuItem to="/morts" onClick={() => setDataOpen(false)}>Morts</MenuItem>
+                    <MenuItem to="/weights" onClick={() => setDataOpen(false)}>Weights</MenuItem>
+                    <MenuItem to="/feed" onClick={() => setDataOpen(false)}>Feed Silos</MenuItem>
+                    <MenuItem to="/water" onClick={() => setDataOpen(false)}>Water</MenuItem>
+                    <MenuItem to="/reminders" onClick={() => setDataOpen(false)}>Reminders</MenuItem>
+                  </div>
+                )}
+              </div>
 
               {/* User icon */}
               <NavLink
@@ -79,7 +141,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Mobile drawer (slides open) */}
+        {/* Mobile drawer */}
         {mobileOpen && (
           <div className="sm:hidden border-t bg-white/90 backdrop-blur animate-fade-slide">
             <div className="mx-auto max-w-6xl px-4 py-2">
@@ -87,8 +149,6 @@ export default function App() {
                 <MobileLink to="/">Dashboard</MobileLink>
                 <MobileLink to="/setup">Setup</MobileLink>
                 <MobileLink to="/farms">Farms</MobileLink>
-
-                {/* Data section on mobile (list) */}
                 <div className="mt-2">
                   <div className="px-2 py-1 text-xs uppercase tracking-wide text-slate-500">Data</div>
                   <div className="mt-1 flex flex-col">
@@ -99,7 +159,6 @@ export default function App() {
                     <MobileLink to="/reminders">Reminders</MobileLink>
                   </div>
                 </div>
-
                 <MobileLink to="/user" icon>
                   <span className="inline-flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
@@ -125,24 +184,28 @@ export default function App() {
   );
 }
 
-function TopNavLink({ to, children }: { to: string; children: React.ReactNode }) {
+function MenuItem({
+  to,
+  onClick,
+  children,
+}: {
+  to: string;
+  onClick?: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <NavLink
       to={to}
+      onClick={onClick}
       className={({ isActive }) =>
         cx(
-          "relative px-3 py-2 rounded transition-all",
-          "hover:bg-black/5 active:scale-[0.98]",
-          isActive && "bg-black/5 font-medium"
+          "block rounded px-3 py-2 text-sm transition",
+          isActive ? "bg-black/5 font-medium" : "hover:bg-black/5"
         )
       }
-      end={to === "/"}
+      role="menuitem"
     >
-      {/* underline hover accent */}
-      <span className="relative">
-        {children}
-        <span className="pointer-events-none absolute -bottom-0.5 left-0 right-0 mx-auto h-0.5 w-0 rounded-full bg-slate-900/30 transition-all group-hover:w-full" />
-      </span>
+      {children}
     </NavLink>
   );
 }
