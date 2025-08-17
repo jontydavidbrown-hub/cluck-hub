@@ -17,23 +17,15 @@ export default function App() {
   }, [location.pathname, location.search]);
 
   return (
-    <div className="min-h-dvh flex flex-col relative">
-      {/* ✨ Soft gradient background (behind everything) */}
-      <div
-        aria-hidden
-        className="pointer-events-none fixed inset-0 -z-10
-                   bg-gradient-to-br from-indigo-100 via-white to-emerald-100"
-      />
-
-      {/* Header: translucent + blur, subtle border + shadow */}
-      <header className="sticky top-0 z-40 bg-white/70 backdrop-blur supports-[backdrop-filter]:bg-white/70 border-b border-black/10 shadow-sm">
+    <div className="min-h-dvh flex flex-col">
+      {/* Header: solid background, no blur/transparency */}
+      <header className="sticky top-0 z-40 bg-white border-b">
         <div className="mx-auto max-w-6xl px-4">
           <div className="h-14 flex items-center justify-between gap-4">
             {/* Left: brand + hamburger */}
             <div className="flex items-center gap-3">
               <button
-                className="sm:hidden inline-flex items-center justify-center rounded p-2 transition
-                           hover:bg-black/5 active:scale-[0.98]"
+                className="sm:hidden inline-flex items-center justify-center rounded p-2 hover:bg-black/5"
                 aria-label="Open menu"
                 onClick={() => setMobileOpen((v) => !v)}
               >
@@ -43,7 +35,7 @@ export default function App() {
                 </svg>
               </button>
 
-              <Link to="/" className="font-semibold tracking-tight hover:opacity-90 transition">
+              <Link to="/" className="font-semibold tracking-tight hover:opacity-90">
                 Cluck Hub
               </Link>
             </div>
@@ -54,7 +46,7 @@ export default function App() {
               <TopNavLink to="/setup">Setup</TopNavLink>
               <TopNavLink to="/farms">Farms</TopNavLink>
 
-              {/* Data dropdown (Morts, Weights, Feed Silos, Water, Reminders) */}
+              {/* Data dropdown (Morts, Weights, Feed, Water, Reminders) */}
               <DataMenu />
 
               {/* User icon */}
@@ -62,8 +54,7 @@ export default function App() {
                 to="/user"
                 className={({ isActive }) =>
                   cx(
-                    "px-2 py-2 rounded inline-flex items-center justify-center transition-all",
-                    "hover:bg-black/5 active:scale-[0.98]",
+                    "px-2 py-2 rounded hover:bg-black/5 inline-flex items-center justify-center",
                     isActive && "bg-black/5"
                   )
                 }
@@ -79,9 +70,9 @@ export default function App() {
           </div>
         </div>
 
-        {/* Mobile drawer (slides open) */}
+        {/* Mobile drawer */}
         {mobileOpen && (
-          <div className="sm:hidden border-t bg-white/90 backdrop-blur animate-fade-slide">
+          <div className="sm:hidden border-t bg-white">
             <div className="mx-auto max-w-6xl px-4 py-2">
               <div className="flex flex-col gap-1 py-2">
                 <MobileLink to="/">Dashboard</MobileLink>
@@ -117,7 +108,7 @@ export default function App() {
 
       {/* Main content */}
       <main className="flex-1">
-        <div className="mx-auto max-w-6xl px-4 py-6 animate-fade-slide">
+        <div className="mx-auto max-w-6xl px-4 py-6">
           <Outlet />
         </div>
       </main>
@@ -131,18 +122,13 @@ function TopNavLink({ to, children }: { to: string; children: React.ReactNode })
       to={to}
       className={({ isActive }) =>
         cx(
-          "relative px-3 py-2 rounded transition-all",
-          "hover:bg-black/5 active:scale-[0.98]",
+          "px-3 py-2 rounded hover:bg-black/5",
           isActive && "bg-black/5 font-medium"
         )
       }
       end={to === "/"}
     >
-      {/* underline hover accent */}
-      <span className="relative">
-        {children}
-        <span className="pointer-events-none absolute -bottom-0.5 left-0 right-0 mx-auto h-0.5 w-0 rounded-full bg-slate-900/30 transition-all group-hover:w-full" />
-      </span>
+      {children}
     </NavLink>
   );
 }
@@ -161,8 +147,7 @@ function MobileLink({
       to={to}
       className={({ isActive }) =>
         cx(
-          "px-3 py-2 rounded transition-all",
-          "hover:bg-black/5 active:scale-[0.99]",
+          "px-3 py-2 rounded hover:bg-black/5",
           isActive && "bg-black/5 font-medium",
           icon && "inline-flex items-center gap-2"
         )
