@@ -1,41 +1,41 @@
-import React, { createContext, useContext, PropsWithChildren } from "react";
-import { useServerState } from "./serverState";
+import React, { createContext, useContext, useEffect } from "react";
+import { useCloudSlice } from "./lib/cloudSlice";
 
-type Farm = { id: string; name?: string };
-type FarmCtx = {
-  farms: Farm[];
+export type Farm = { id: string; name: string };
+
+type Ctx = {
   farmId: string | null;
   setFarmId: (id: string | null) => void;
-  createFarm: (name?: string) => string;
+  farms: Farm[];
+  setFarms: React.Dispatch<React.SetStateAction<Farm[]>>;
 };
 
-const Ctx = createContext<FarmCtx | undefined>(undefined);
+const FarmCtx = createContext<Ctx | undefined>(undefined);
 
-function newId() {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
+export function FarmProvider({ children }: { children: React.ReactNode }) {
+  // Global farms list (shared across devices)
+  const [farms, setFarms] = useCloudSlice<Farm[]>("farms", [], { scope: "global" });
 
-export function FarmProvider({ children }: PropsWithChildren) {
-  // ✅ starts empty; no “My Farm” seeding
-  const { state: farms = [], setState: setFarms } = useServerState<Farm[]>("farms", []);
-  const { state: farmId = null, setState: setFarmId } = useServerState<string | null>("farmId", null);
+  // Selected farm id (also global so devices share the same selection if you want)
+  const [farmId, setFarmId] = useCloudSlice<string | null>("selectedFarmId", null, { scope: "global" });
 
-  const createFarm = (name?: string) => {
-    const id = newId();
-    const farm: Farm = { id, name: name?.trim() || "" };
-    setFarms(prev => [...(prev || []), farm]);
-    if (!farmId) setFarmId(id);
-    return id;
-  };
+  // Keep selection valid but don't auto-create any farm
+  useEffect(() => {
+    if (!farms || farms.length === 0) {
+      if (farmId !== null) setFarmId(null);
+      return;
+    }
+    if (!farmId || !farms.some(f => f.id === farmId)) {
+      setFarmId(farms[0].id);
+    }
+  }, [farms, farmId, setFarmId]);
 
-  const value: FarmCtx = { farms, farmId, setFarmId, createFarm };
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  const value: Ctx = { farmId, setFarmId, farms: farms || [], setFarms };
+  return <FarmCtx.Provider value={value}>{children}</FarmCtx.Provider>;
 }
 
 export function useFarm() {
-  const ctx = useContext(Ctx);
+  const ctx = useContext(FarmCtx);
   if (!ctx) throw new Error("useFarm must be used within <FarmProvider>");
   return ctx;
 }
-
-export default FarmProvider;
