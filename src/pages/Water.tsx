@@ -70,9 +70,12 @@ export default function Water() {
             <label className="block text-sm mb-1">Chlorine (ppm)</label>
             <input
               type="number"
-              className="… placeholder-transparent"
               placeholder="0"
-              … />
+              className="w-full border rounded px-2 py-1 placeholder-transparent"
+              value={something}
+              onChange={e => setSomething(Number(e.target.value))}
+            />
+
 
           </div>
           <div className="md:col-span-2">
