@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useServerState } from "../lib/serverState";
+import { useCloudSlice } from "../lib/cloudSlice";
 
 type Delivery = { shed: string; type: "Starter" | "Grower" | "Finisher" | "Booster"; tonnes: number; date: string };
 type Alloc = Record<"Starter" | "Grower" | "Finisher", number>; // loads per day (x24 = tonnes/day)
@@ -7,16 +7,16 @@ type Alloc = Record<"Starter" | "Grower" | "Finisher", number>; // loads per day
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
 export default function FeedSilos() {
-  const { state: shedsRaw } = useServerState<any>("sheds", []);
+  const { state: shedsRaw } = useCloudSlice<any>("sheds", []);
   const sheds: string[] = Array.isArray(shedsRaw)
     ? shedsRaw.map((x: any) => (typeof x === "string" ? x : x?.name)).filter(Boolean)
     : [];
 
   const { state: deliveries, setState: setDeliveries, loading, synced } =
-    useServerState<Delivery[]>("deliveries", []);
+    useCloudSlice<Delivery[]>("deliveries", []);
 
   const { state: allocations, setState: setAlloc } =
-    useServerState<Alloc>("allocations", { Starter: 0, Grower: 0, Finisher: 0 });
+    useCloudSlice<Alloc>("allocations", { Starter: 0, Grower: 0, Finisher: 0 });
 
   const [shed, setShed] = useState("");
   const [form, setForm] = useState<Delivery>({ shed: "", type: "Starter", tonnes: 0, date: todayISO() });
