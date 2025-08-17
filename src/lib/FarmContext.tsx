@@ -1,101 +1,41 @@
-import React, { createContext, useContext, useMemo, PropsWithChildren } from "react";
-import { useServerState, getState, setState, setSettings } from "./serverState";
-import type { AppSettings } from "./defaults";
+import React, { createContext, useContext, PropsWithChildren } from "react";
+import { useServerState } from "./serverState";
 
-type Member = { email: string; role: "owner" | "manager" | "worker" | "viewer" };
-type Farm = { id: string; name: string; members: Member[] };
-
-type FarmContextValue = {
-  user: { email: string } | null | undefined;
-  farmId: string | null | undefined;
-  setFarmId: (id: string | null) => void;
-  settings: AppSettings;
-  updateSettings: (patch: Partial<AppSettings>) => void;
-  state: any;
-  setState: typeof setState;
-
+type Farm = { id: string; name?: string };
+type FarmCtx = {
   farms: Farm[];
-  createFarm: (name: string) => Promise<Farm>;
-  inviteMember: (farmId: string, email: string, role: Member["role"]) => Promise<void>;
-  changeRole: (farmId: string, email: string, role: Member["role"]) => Promise<void>;
-  removeMember: (farmId: string, email: string) => Promise<void>;
-  refresh: () => void;
+  farmId: string | null;
+  setFarmId: (id: string | null) => void;
+  createFarm: (name?: string) => string;
 };
 
-const FarmContext = createContext<FarmContextValue | undefined>(undefined);
+const Ctx = createContext<FarmCtx | undefined>(undefined);
 
-function uid() { return Math.random().toString(36).slice(2, 10); }
+function newId() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 export function FarmProvider({ children }: PropsWithChildren) {
-  const state = useServerState();
+  // ✅ starts empty; no “My Farm” seeding
+  const { state: farms = [], setState: setFarms } = useServerState<Farm[]>("farms", []);
+  const { state: farmId = null, setState: setFarmId } = useServerState<string | null>("farmId", null);
 
-  const value = useMemo<FarmContextValue>(() => {
-    const s = getState();
+  const createFarm = (name?: string) => {
+    const id = newId();
+    const farm: Farm = { id, name: name?.trim() || "" };
+    setFarms(prev => [...(prev || []), farm]);
+    if (!farmId) setFarmId(id);
+    return id;
+  };
 
-    let farms: Farm[] = Array.isArray(s.farms) ? s.farms as any : [];
-    if (farms.length === 0) {
-      farms = [{ id: "default", name: "My Farm", members: [] }];
-      setState({ farms, farmId: "default" });
-    }
-
-    async function createFarm(name: string): Promise<Farm> {
-      const next: Farm = { id: uid(), name, members: [] };
-      const curr = getState();
-      setState({ farms: [...(curr.farms || []), next], farmId: next.id });
-      return next;
-    }
-
-    async function inviteMember(fid: string, email: string, role: Member["role"]) {
-      const curr = getState();
-      const updated = (curr.farms || []).map((f: Farm) =>
-        f.id === fid ? { ...f, members: [...(f.members || []), { email, role }] } : f
-      );
-      setState({ farms: updated });
-    }
-
-    async function changeRole(fid: string, email: string, role: Member["role"]) {
-      const curr = getState();
-      const updated = (curr.farms || []).map((f: Farm) =>
-        f.id === fid
-          ? { ...f, members: (f.members || []).map(m => m.email === email ? { ...m, role } : m) }
-          : f
-      );
-      setState({ farms: updated });
-    }
-
-    async function removeMember(fid: string, email: string) {
-      const curr = getState();
-      const updated = (curr.farms || []).map((f: Farm) =>
-        f.id === fid ? { ...f, members: (f.members || []).filter(m => m.email !== email) } : f
-      );
-      setState({ farms: updated });
-    }
-
-    return {
-      user: s.user ?? null,
-      farmId: s.farmId ?? (farms[0]?.id ?? null),
-      setFarmId: (id) => setState({ farmId: id }),
-      settings: s.settings,
-      updateSettings: (patch) => setSettings(patch),
-      state,
-      setState,
-
-      farms,
-      createFarm,
-      inviteMember,
-      changeRole,
-      removeMember,
-      refresh: () => setState((x) => ({ ...x })),
-    };
-  }, [state]);
-
-  return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
+  const value: FarmCtx = { farms, farmId, setFarmId, createFarm };
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useFarm() {
-  const ctx = useContext(FarmContext);
+  const ctx = useContext(Ctx);
   if (!ctx) throw new Error("useFarm must be used within <FarmProvider>");
   return ctx;
 }
 
-export function getFarmState() { return getState(); }
+export default FarmProvider;
