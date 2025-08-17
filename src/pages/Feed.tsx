@@ -1,119 +1,257 @@
 import { useMemo, useState } from "react";
 import { useCloudSlice } from "../lib/cloudSlice";
 
-type Delivery = { shed: string; type: "Starter" | "Grower" | "Finisher" | "Booster"; tonnes: number; date: string };
-type Alloc = Record<"Starter" | "Grower" | "Finisher", number>; // loads per day (x24 = tonnes/day)
+type FeedType = "Starter" | "Grower" | "Finisher";
+const FEED_TYPES: FeedType[] = ["Starter", "Grower", "Finisher"];
 
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+type SiloRow = {
+  id: string;
+  name: string;            // silo name
+  type: FeedType;          // Starter/Grower/Finisher
+  capacityT: number;       // capacity in tonnes
+  levelT: number;          // current level in tonnes
+  notes?: string;
+};
 
-export default function FeedSilos() {
-  const { state: shedsRaw } = useCloudSlice<any>("sheds", []);
-  const sheds: string[] = Array.isArray(shedsRaw)
-    ? shedsRaw.map((x: any) => (typeof x === "string" ? x : x?.name)).filter(Boolean)
-    : [];
+function newId() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+function emptyRow(): SiloRow {
+  return { id: newId(), name: "", type: "Starter", capacityT: 0, levelT: 0, notes: "" };
+}
 
-  const { state: deliveries, setState: setDeliveries, loading, synced } =
-    useCloudSlice<Delivery[]>("deliveries", []);
+export default function Feed() {
+  // NOTE: If your existing slice key differs (e.g., "feed"), change "feedSilos" to that.
+  const [rows, setRows] = useCloudSlice<SiloRow[]>("feedSilos", []);
+  const [draft, setDraft] = useState<SiloRow>(emptyRow());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [edit, setEdit] = useState<SiloRow | null>(null);
 
-  const { state: allocations, setState: setAlloc } =
-    useCloudSlice<Alloc>("allocations", { Starter: 0, Grower: 0, Finisher: 0 });
+  const sorted = useMemo(
+    () => [...rows].sort((a, b) => a.name.localeCompare(b.name)),
+    [rows]
+  );
 
-  const [shed, setShed] = useState("");
-  const [form, setForm] = useState<Delivery>({ shed: "", type: "Starter", tonnes: 0, date: todayISO() });
+  const totals = useMemo(() => {
+    const cap = rows.reduce((s, r) => s + (Number(r.capacityT) || 0), 0);
+    const lvl = rows.reduce((s, r) => s + (Number(r.levelT) || 0), 0);
+    return { cap, lvl, pct: cap > 0 ? Math.round((lvl / cap) * 100) : 0 };
+  }, [rows]);
 
-  const dailyTonnes = useMemo(() => {
-    const loads = allocations.Starter + allocations.Grower + allocations.Finisher;
-    return loads * 24;
-  }, [allocations]);
-
-  function addDelivery() {
-    if (!form.shed || !form.tonnes || form.tonnes <= 0) return;
-    setDeliveries((prev) => [...(prev || []), { ...form }]);
-    setForm({ shed: "", type: "Starter", tonnes: 0, date: todayISO() });
+  function clampNum(n: any) {
+    const v = Number(n);
+    return Number.isFinite(v) ? v : 0;
   }
 
-  function removeDelivery(idx: number) {
-    setDeliveries((prev) => (prev || []).filter((_, i) => i !== idx));
-  }
+  const addRow = () => {
+    if (!draft.name.trim()) return;
+    const cleaned: SiloRow = {
+      ...draft,
+      id: draft.id || newId(),
+      capacityT: Math.max(0, clampNum(draft.capacityT)),
+      levelT: Math.max(0, Math.min(clampNum(draft.levelT), clampNum(draft.capacityT))),
+      type: FEED_TYPES.includes(draft.type) ? draft.type : "Starter",
+    };
+    setRows(prev => [...(prev || []), cleaned]);
+    setDraft(emptyRow());
+  };
+
+  const startEdit = (r: SiloRow) => {
+    setEditingId(r.id);
+    setEdit({ ...r });
+  };
+
+  const saveEdit = () => {
+    if (!edit) return;
+    const cleaned: SiloRow = {
+      ...edit,
+      name: (edit.name || "").trim(),
+      capacityT: Math.max(0, clampNum(edit.capacityT)),
+      levelT: Math.max(0, Math.min(clampNum(edit.levelT), clampNum(edit.capacityT))),
+      type: FEED_TYPES.includes(edit.type) ? edit.type : "Starter",
+    };
+    if (!cleaned.name) return;
+    setRows(prev => prev.map(r => (r.id === cleaned.id ? cleaned : r)));
+    setEditingId(null);
+    setEdit(null);
+  };
+
+  const remove = (id: string) => {
+    if (!confirm("Remove this silo?")) return;
+    setRows(prev => prev.filter(r => r.id !== id));
+  };
 
   return (
-    <div className="p-4 max-w-5xl mx-auto">
-      <div className="mb-4 flex items-center gap-3">
-        {!loading && (
-          <span
-            className={`text-xs px-2 py-1 rounded border ${
-              synced ? "text-green-700 border-green-200 bg-green-50" : "text-amber-700 border-amber-200 bg-amber-50"
-            }`}
-          >
-            {synced ? "Synced" : "Saving…"}
-          </span>
-        )}
+    <div className="p-4 space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Feed Silos</h1>
+        <div className="text-sm text-slate-600">
+          Total: {totals.lvl.toFixed(1)} / {totals.cap.toFixed(1)} t ({totals.pct}%)
+        </div>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Allocations */}
-        <section className="p-4 rounded-2xl border bg-white">
-          <h2 className="text-lg font-medium mb-3">Allocations (loads per hour)</h2>
-          {(["Starter", "Grower", "Finisher"] as const).map((t) => (
-            <div key={t} className="flex items-center gap-3 mb-2">
-              <label className="w-24">{t}</label>
-              <input
-                type="number"
-                min={0}
-                step={0.01}
-                value={allocations[t]}
-                onChange={(e) => setAlloc({ ...allocations, [t]: Number(e.target.value) })}
-                className="border rounded px-2 py-1 w-32"
-              />
-            </div>
-          ))}
-          <div className="text-sm text-slate-600 mt-2">≈ {dailyTonnes.toFixed(2)} tonnes/day</div>
-        </section>
-
-        {/* Deliveries */}
-        <section className="p-4 rounded-2xl border bg-white">
-          <h2 className="text-lg font-medium mb-3">Add delivery</h2>
-          <div className="flex flex-wrap items-center gap-3">
-            <select value={form.shed} onChange={(e) => setForm({ ...form, shed: e.target.value })} className="border rounded px-2 py-1">
-              <option value="">Select shed…</option>
-              {sheds.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-            <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as any })} className="border rounded px-2 py-1">
-              {(["Starter", "Grower", "Finisher", "Booster"] as const).map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <input type="number" min={0} step={0.01} value={form.tonnes} onChange={(e) => setForm({ ...form, tonnes: Number(e.target.value) })} className="border rounded px-2 py-1 w-32" />
-            <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="border rounded px-2 py-1" />
-            <button onClick={addDelivery} className="px-3 py-2 rounded bg-slate-900 text-white">Add</button>
+      {/* Add form */}
+      <div className="p-4 border rounded-2xl bg-white">
+        <div className="font-medium mb-3">Add silo</div>
+        <div className="grid md:grid-cols-6 gap-3">
+          <div className="md:col-span-2">
+            <label className="block text-sm mb-1">Silo name</label>
+            <input
+              className="w-full border rounded px-2 py-1"
+              placeholder="e.g., Silo 1"
+              value={draft.name}
+              onChange={e => setDraft({ ...draft, name: e.target.value })}
+            />
           </div>
 
-          <table className="w-full mt-4 text-sm border-separate border-spacing-y-1">
+          <div>
+            <label className="block text-sm mb-1">Feed type</label>
+            <select
+              className="w-full border rounded px-2 py-1"
+              value={draft.type}
+              onChange={e => setDraft({ ...draft, type: (e.target.value as FeedType) })}
+            >
+              {FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm mb-1">Capacity (t)</label>
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              className="w-full border rounded px-2 py-1"
+              value={draft.capacityT}
+              onChange={e => setDraft({ ...draft, capacityT: clampNum(e.target.value) })}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm mb-1">Level (t)</label>
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              className="w-full border rounded px-2 py-1"
+              value={draft.levelT}
+              onChange={e => setDraft({ ...draft, levelT: clampNum(e.target.value) })}
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-sm mb-1">Notes</label>
+            <input
+              className="w-full border rounded px-2 py-1"
+              value={draft.notes ?? ""}
+              onChange={e => setDraft({ ...draft, notes: e.target.value })}
+            />
+          </div>
+        </div>
+
+        <div className="mt-3">
+          <button className="px-4 py-2 rounded bg-black text-white" onClick={addRow}>
+            Add
+          </button>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="p-4 border rounded-2xl bg-white">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-slate-500">
-                <th className="p-2">Date</th>
-                <th className="p-2">Shed</th>
-                <th className="p-2">Type</th>
-                <th className="p-2">Tonnes</th>
-                <th className="p-2"></th>
+              <tr className="text-left border-b">
+                <th className="py-2 pr-2">Silo</th>
+                <th className="py-2 pr-2">Type</th>
+                <th className="py-2 pr-2">Capacity (t)</th>
+                <th className="py-2 pr-2">Level (t)</th>
+                <th className="py-2 pr-2">Notes</th>
+                <th className="py-2 pr-2">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {(deliveries || []).map((d, i) => (
-                <tr key={i} className="bg-white rounded">
-                  <td className="p-3">{d.date}</td>
-                  <td className="p-3">{d.shed}</td>
-                  <td className="p-3">{d.type}</td>
-                  <td className="p-3">{d.tonnes.toFixed(2)}</td>
-                  <td className="p-3 text-right">
-                    <button onClick={() => removeDelivery(i)} className="text-red-600 hover:underline">remove</button>
+              {sorted.map(r => (
+                <tr key={r.id} className="border-b">
+                  <td className="py-2 pr-2">
+                    {editingId === r.id ? (
+                      <input
+                        className="border rounded px-2 py-1"
+                        value={edit?.name || ""}
+                        onChange={e => setEdit(s => ({ ...(s as SiloRow), name: e.target.value }))}
+                      />
+                    ) : r.name}
+                  </td>
+
+                  <td className="py-2 pr-2">
+                    {editingId === r.id ? (
+                      <select
+                        className="border rounded px-2 py-1"
+                        value={edit?.type || "Starter"}
+                        onChange={e => setEdit(s => ({ ...(s as SiloRow), type: e.target.value as FeedType }))}
+                      >
+                        {FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    ) : r.type}
+                  </td>
+
+                  <td className="py-2 pr-2">
+                    {editingId === r.id ? (
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        className="border rounded px-2 py-1"
+                        value={edit?.capacityT ?? 0}
+                        onChange={e => setEdit(s => ({ ...(s as SiloRow), capacityT: clampNum(e.target.value) }))}
+                      />
+                    ) : r.capacityT.toFixed(2)}
+                  </td>
+
+                  <td className="py-2 pr-2">
+                    {editingId === r.id ? (
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        className="border rounded px-2 py-1"
+                        value={edit?.levelT ?? 0}
+                        onChange={e => setEdit(s => ({ ...(s as SiloRow), levelT: clampNum(e.target.value) }))}
+                      />
+                    ) : r.levelT.toFixed(2)}
+                  </td>
+
+                  <td className="py-2 pr-2">
+                    {editingId === r.id ? (
+                      <input
+                        className="border rounded px-2 py-1"
+                        value={edit?.notes || ""}
+                        onChange={e => setEdit(s => ({ ...(s as SiloRow), notes: e.target.value }))}
+                      />
+                    ) : (r.notes || "")}
+                  </td>
+
+                  <td className="py-2 pr-2">
+                    {editingId === r.id ? (
+                      <div className="flex gap-2">
+                        <button className="px-2 py-1 border rounded" onClick={saveEdit}>Save</button>
+                        <button className="px-2 py-1 border rounded" onClick={() => { setEditingId(null); setEdit(null); }}>Cancel</button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button className="px-2 py-1 border rounded" onClick={() => startEdit(r)}>Edit</button>
+                        <button className="px-2 py-1 border rounded text-red-600" onClick={() => remove(r.id)}>Remove</button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
-              {!deliveries?.length && <tr><td className="p-6 text-slate-500" colSpan={5}>No deliveries yet.</td></tr>}
+              {sorted.length === 0 && (
+                <tr><td className="py-6 text-gray-500" colSpan={6}>No silos yet.</td></tr>
+              )}
             </tbody>
           </table>
-        </section>
+        </div>
       </div>
     </div>
   );
