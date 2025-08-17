@@ -10,68 +10,93 @@ function debounce<T extends (...args: any[]) => any>(fn: T, ms: number) {
 }
 
 /**
- * useCloudSlice(key, initial)
+ * useCloudSlice(key, initial, opts?)
  * - reads initial value from Netlify Blobs on mount (scoped by farm)
- * - pushes changes to Blobs (debounced) whenever local slice changes
- * - falls back silently if offline or unauthenticated
+ * - pushes changes to Blobs (debounced)
+ * - pulls again on window focus / tab visibility regain
+ * - optional background polling (default 30s)
  */
-export function useCloudSlice<T>(key: string, initial: T) {
+export function useCloudSlice<T>(key: string, initial: T, opts?: { pollMs?: number }) {
   const { state: local, setState: setLocal } = useServerState<T>(key, initial);
   const { farmId } = useFarm() as any;
   const loadedOnce = useRef(false);
   const lastPushed = useRef<string>("");
+  const pulling = useRef<AbortController | null>(null);
+  const pollMs = opts?.pollMs ?? 30000;
+
+  const scopeKey = (scope: string, k: string) => `${scope}/${k}`;
+  const scoped = () => scopeKey(farmId || "default", key);
+
+  async function pullOnce() {
+    try {
+      const ctrl = new AbortController();
+      pulling.current?.abort(); // cancel any in-flight
+      pulling.current = ctrl;
+
+      const res = await fetch(`/.netlify/functions/data?key=${encodeURIComponent(scoped())}`, {
+        credentials: "include",
+        signal: ctrl.signal,
+      });
+      if (!res.ok) return;
+      const json = await res.json(); // { value }
+      if (json?.value != null && !jsonEqual(json.value, local)) {
+        setLocal(json.value);
+      }
+    } catch {
+      /* ignore network/auth blips */
+    }
+  }
 
   // Load from cloud once on mount
   useEffect(() => {
     if (loadedOnce.current) return;
     loadedOnce.current = true;
-    (async () => {
-      try {
-        const scope = farmId || "default";
-        const res = await fetch(
-          `/.netlify/functions/data?key=${encodeURIComponent(`${scope}/${key}`)}`,
-          { credentials: "include" }
-        );
-        if (res.ok) {
-          const json = await res.json(); // { value: ... }
-          if (json?.value != null && !jsonEqual(json.value, local)) {
-            setLocal(json.value);
-          }
-        }
-      } catch {
-        // ignore: offline or not signed in
-      }
-    })();
+    pullOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, farmId]); // don't include local/setLocal to avoid loops
+  }, [key, farmId]);
+
+  // Pull on focus / when tab becomes visible
+  useEffect(() => {
+    function onFocus() { pullOnce(); }
+    function onVis() { if (document.visibilityState === "visible") pullOnce(); }
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [key, farmId]);
+
+  // Optional background polling
+  useEffect(() => {
+    if (!pollMs) return;
+    const id = setInterval(pullOnce, pollMs);
+    return () => clearInterval(id);
+  }, [pollMs, key, farmId]);
 
   const push = useRef(
-    debounce(async (value: T, scope: string, keyStr: string) => {
+    debounce(async (value: T, keyScoped: string) => {
       try {
         const body = JSON.stringify(value);
         if (lastPushed.current === body) return;
         lastPushed.current = body;
-        await fetch(
-          `/.netlify/functions/data?key=${encodeURIComponent(`${scope}/${keyStr}`)}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body,
-          }
-        );
+        await fetch(`/.netlify/functions/data?key=${encodeURIComponent(keyScoped)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body,
+        });
       } catch {
-        // ignore transient errors
+        /* ignore; next change will retry */
       }
     }, 500)
   ).current;
 
   // Push to cloud when the slice changes
   useEffect(() => {
-    const scope = farmId || "default";
-    push(local, scope, key);
+    push(local, scoped());
   }, [local, key, farmId, push]);
 
-  // Return exactly the same tuple shape as useServerState slice mode
+  // Same tuple API as before
   return [local, setLocal] as const;
 }
