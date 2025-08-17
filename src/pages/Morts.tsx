@@ -16,16 +16,14 @@ type Row = {
   date: string;                // YYYY-MM-DD
   shed?: string;
 
-  // Explicit fields
   morts?: number;              // natural deaths
   cullRunts?: number;
   cullLegs?: number;
   cullNonStart?: number;
   cullOther?: number;
 
-  // Compatibility fields used elsewhere
-  culls?: number;              // sum of all cull categories
-  mortalities?: number;        // morts + culls
+  culls?: number;              // aggregate culls (compat)
+  mortalities?: number;        // morts + culls (compat)
 };
 
 function emptyRow(): Row {
@@ -42,13 +40,6 @@ function emptyRow(): Row {
     mortalities: 0,
   };
 }
-
-function sumCulls(r: Partial<Row>) {
-  return (Number(r.cullRunts) || 0)
-       + (Number(r.cullLegs) || 0)
-       + (Number(r.cullNonStart) || 0)
-       + (Number(r.cullOther) || 0);
-}
 function clampNum(n: any) {
   const v = Number(n);
   return Number.isFinite(v) && v >= 0 ? v : 0;
@@ -59,6 +50,18 @@ function daysBetweenUTC(a?: string, b?: string) {
   const B = new Date(b + "T00:00:00Z").getTime();
   return Math.floor((B - A) / (1000 * 60 * 60 * 24));
 }
+function cullsOnly(r: Partial<Row>) {
+  if (typeof r.culls === "number") return Math.max(0, r.culls);
+  const sum =
+    (Number(r.cullRunts) || 0) +
+    (Number(r.cullLegs) || 0) +
+    (Number(r.cullNonStart) || 0) +
+    (Number(r.cullOther) || 0);
+  return Math.max(0, sum);
+}
+function mortsOnly(r: Partial<Row>) {
+  return Math.max(0, Number(r.morts) || 0);
+}
 
 export default function Morts() {
   const [search] = useSearchParams();
@@ -67,12 +70,11 @@ export default function Morts() {
   const [rows, setRows] = useCloudSlice<Row[]>("dailyLog", []);
   const [sheds] = useCloudSlice<Shed[]>("sheds", []);
 
-  // Top-level Shed selection
+  // Shed selector
   const shedNames = useMemo(
     () => (sheds || []).map(s => s.name || "").filter(Boolean).sort((a, b) => a.localeCompare(b)),
     [sheds]
   );
-
   const [selectedShed, setSelectedShed] = useState<string>("");
 
   useEffect(() => {
@@ -81,25 +83,26 @@ export default function Morts() {
     else if (shedNames.length) setSelectedShed(shedNames[0]);
   }, [preselectShed, shedNames, selectedShed]);
 
-  // Lookup placementDate + placed birds for summaries
-  const placementByShed = useMemo(() => {
-    const m = new Map<string, { date?: string; placed: number }>();
+  // placement + placed birds (for %)
+  const metaByShed = useMemo(() => {
+    const m = new Map<string, { placementDate?: string; placed: number }>();
     for (const s of sheds || []) {
       const name = (s.name || "").trim();
       if (!name) continue;
-      const placed = Number(s.birdsPlaced ?? s.placementBirds) || 0;
-      m.set(name, { date: s.placementDate, placed });
+      m.set(name, {
+        placementDate: s.placementDate,
+        placed: Number(s.birdsPlaced ?? s.placementBirds) || 0,
+      });
     }
     return m;
   }, [sheds]);
 
-  // Rows for selected shed
   const shedRows = useMemo(() => {
     const list = (rows || []).filter(r => (r.shed || "") === (selectedShed || ""));
     return list.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   }, [rows, selectedShed]);
 
-  // Draft (shed applied on save)
+  // Draft row
   const [draft, setDraft] = useState<Row>(emptyRow());
   useEffect(() => {
     setDraft(d => ({ ...emptyRow(), date: d.date || new Date().toISOString().slice(0, 10) }));
@@ -110,22 +113,13 @@ export default function Morts() {
 
   function normalize(r: Row): Row {
     const morts = clampNum(r.morts);
-    const cRunts = clampNum(r.cullRunts);
-    const cLegs = clampNum(r.cullLegs);
-    const cNon = clampNum(r.cullNonStart);
-    const cOther = clampNum(r.cullOther);
-    const culls = cRunts + cLegs + cNon + cOther;
+    const cullRunts = clampNum(r.cullRunts);
+    const cullLegs = clampNum(r.cullLegs);
+    const cullNonStart = clampNum(r.cullNonStart);
+    const cullOther = clampNum(r.cullOther);
+    const culls = cullRunts + cullLegs + cullNonStart + cullOther;
     const mortalities = morts + culls;
-    return {
-      ...r,
-      morts,
-      cullRunts: cRunts,
-      cullLegs: cLegs,
-      cullNonStart: cNon,
-      cullOther: cOther,
-      culls,
-      mortalities,
-    };
+    return { ...r, morts, cullRunts, cullLegs, cullNonStart, cullOther, culls, mortalities };
   }
 
   function addRow() {
@@ -142,12 +136,10 @@ export default function Morts() {
     setRows([...(rows || []), cleaned]);
     setDraft(emptyRow());
   }
-
   function startEdit(r: Row) {
     setEditingId(r.id);
     setEdit({ ...r });
   }
-
   function saveEdit() {
     if (!edit) return;
     const cleaned = normalize(edit);
@@ -155,23 +147,27 @@ export default function Morts() {
     setEditingId(null);
     setEdit(null);
   }
-
   function remove(id: string) {
     if (!confirm("Remove this entry?")) return;
     setRows((rows || []).filter(r => r.id !== id));
   }
 
-  // --- Summary tiles for the selected shed ---
+  // Summary tiles: Today (M/C), All-time (M/C), % of Placed Birds
   const summary = useMemo(() => {
-    const place = placementByShed.get(selectedShed || "");
+    const today = new Date().toISOString().slice(0, 10);
+    const place = metaByShed.get(selectedShed || "");
     const placed = place?.placed ?? 0;
-    const totalMorts = (shedRows || []).reduce(
-      (sum, r) => sum + (Number(r.morts) || 0) + sumCulls(r),
-      0
-    );
-    const pct = placed > 0 ? (totalMorts / placed) * 100 : 0;
-    return { placed, totalMorts, pct };
-  }, [placementByShed, selectedShed, shedRows]);
+
+    let mAll = 0, cAll = 0, mToday = 0, cToday = 0;
+    for (const r of shedRows) {
+      const m = mortsOnly(r);
+      const c = cullsOnly(r);
+      mAll += m; cAll += c;
+      if (r.date === today) { mToday += m; cToday += c; }
+    }
+    const pct = placed > 0 ? ((mAll + cAll) / placed) * 100 : 0;
+    return { placed, mAll, cAll, mToday, cToday, pct };
+  }, [metaByShed, selectedShed, shedRows]);
 
   return (
     <div className="p-4 space-y-6">
@@ -179,7 +175,7 @@ export default function Morts() {
         <h1 className="text-2xl font-semibold">Morts</h1>
       </div>
 
-      {/* Shed selector */}
+      {/* Shed Number selector */}
       <div className="p-4 border rounded-2xl bg-white">
         <label className="block text-sm mb-1">Shed Number</label>
         {shedNames.length > 0 ? (
@@ -199,11 +195,15 @@ export default function Morts() {
         )}
       </div>
 
-      {/* NEW: Summary tiles */}
-      <div className="grid grid-cols-2 gap-4">
+      {/* Summary tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <div className="rounded border p-4 bg-white">
-          <div className="text-xs text-slate-500">Total Morts</div>
-          <div className="text-2xl font-semibold">{summary.totalMorts}</div>
+          <div className="text-xs text-slate-500">Today (Morts/Culls)</div>
+          <div className="text-2xl font-semibold">{summary.mToday}/{summary.cToday}</div>
+        </div>
+        <div className="rounded border p-4 bg-white">
+          <div className="text-xs text-slate-500">All Time (Morts/Culls)</div>
+          <div className="text-2xl font-semibold">{summary.mAll}/{summary.cAll}</div>
         </div>
         <div className="rounded border p-4 bg-white">
           <div className="text-xs text-slate-500">% of Placed Birds</div>
@@ -213,7 +213,7 @@ export default function Morts() {
         </div>
       </div>
 
-      {/* Add form (no shed, no notes) */}
+      {/* Add entry (shed removed, notes removed) */}
       <div className="p-4 border rounded-2xl bg-white">
         <div className="font-medium mb-3">Add entry</div>
         <div className="grid md:grid-cols-6 gap-3">
@@ -226,8 +226,6 @@ export default function Morts() {
               onChange={(e) => setDraft({ ...draft, date: e.target.value })}
             />
           </div>
-
-          {/* Numeric inputs with transparent placeholders */}
           <div>
             <label className="block text-sm mb-1">Morts</label>
             <input
@@ -238,7 +236,6 @@ export default function Morts() {
               onChange={(e) => setDraft({ ...draft, morts: e.target.value === "" ? undefined : clampNum(e.target.value) })}
             />
           </div>
-
           <div>
             <label className="block text-sm mb-1">Cull Runts</label>
             <input
@@ -249,7 +246,6 @@ export default function Morts() {
               onChange={(e) => setDraft({ ...draft, cullRunts: e.target.value === "" ? undefined : clampNum(e.target.value) })}
             />
           </div>
-
           <div>
             <label className="block text-sm mb-1">Cull Legs</label>
             <input
@@ -260,7 +256,6 @@ export default function Morts() {
               onChange={(e) => setDraft({ ...draft, cullLegs: e.target.value === "" ? undefined : clampNum(e.target.value) })}
             />
           </div>
-
           <div>
             <label className="block text-sm mb-1">Cull Non-Start</label>
             <input
@@ -271,7 +266,6 @@ export default function Morts() {
               onChange={(e) => setDraft({ ...draft, cullNonStart: e.target.value === "" ? undefined : clampNum(e.target.value) })}
             />
           </div>
-
           <div>
             <label className="block text-sm mb-1">Cull Other</label>
             <input
@@ -295,7 +289,7 @@ export default function Morts() {
         </div>
       </div>
 
-      {/* Single saved-entries table for the selected shed (no date column, shows Day Age; editable & removable) */}
+      {/* Breakdown table (Day Age only; editable & removable) */}
       <div className="p-4 border rounded-2xl bg-white">
         <div className="font-medium mb-3">Breakdown — {selectedShed || "No shed selected"}</div>
         <div className="overflow-x-auto">
@@ -314,9 +308,9 @@ export default function Morts() {
             </thead>
             <tbody>
               {shedRows.map((r) => {
-                const place = placementByShed.get(selectedShed || "");
-                const age = place?.date ? daysBetweenUTC(place.date, r.date) : undefined;
-                const total = (Number(r.morts) || 0) + sumCulls(r);
+                const place = metaByShed.get(selectedShed || "");
+                const age = place?.placementDate ? daysBetweenUTC(place.placementDate, r.date) : undefined;
+                const total = (mortsOnly(r) + cullsOnly(r)) || 0;
                 const isEditing = editingId === r.id;
 
                 return (
@@ -333,7 +327,7 @@ export default function Morts() {
                           onChange={(e) => setEdit((s) => ({ ...(s as Row), morts: e.target.value === "" ? undefined : clampNum(e.target.value) }))}
                         />
                       ) : (
-                        r.morts ?? 0
+                        mortsOnly(r)
                       )}
                     </td>
 
@@ -347,7 +341,7 @@ export default function Morts() {
                           onChange={(e) => setEdit((s) => ({ ...(s as Row), cullRunts: e.target.value === "" ? undefined : clampNum(e.target.value) }))}
                         />
                       ) : (
-                        r.cullRunts ?? 0
+                        Number(r.cullRunts) || 0
                       )}
                     </td>
 
@@ -361,7 +355,7 @@ export default function Morts() {
                           onChange={(e) => setEdit((s) => ({ ...(s as Row), cullLegs: e.target.value === "" ? undefined : clampNum(e.target.value) }))}
                         />
                       ) : (
-                        r.cullLegs ?? 0
+                        Number(r.cullLegs) || 0
                       )}
                     </td>
 
@@ -375,7 +369,7 @@ export default function Morts() {
                           onChange={(e) => setEdit((s) => ({ ...(s as Row), cullNonStart: e.target.value === "" ? undefined : clampNum(e.target.value) }))}
                         />
                       ) : (
-                        r.cullNonStart ?? 0
+                        Number(r.cullNonStart) || 0
                       )}
                     </td>
 
@@ -389,7 +383,7 @@ export default function Morts() {
                           onChange={(e) => setEdit((s) => ({ ...(s as Row), cullOther: e.target.value === "" ? undefined : clampNum(e.target.value) }))}
                         />
                       ) : (
-                        r.cullOther ?? 0
+                        Number(r.cullOther) || 0
                       )}
                     </td>
 
@@ -398,30 +392,13 @@ export default function Morts() {
                     <td className="py-2 pr-2">
                       {isEditing ? (
                         <div className="flex gap-2">
-                          <button className="px-2 py-1 border rounded" onClick={saveEdit}>
-                            Save
-                          </button>
-                          <button
-                            className="px-2 py-1 border rounded"
-                            onClick={() => {
-                              setEditingId(null);
-                              setEdit(null);
-                            }}
-                          >
-                            Cancel
-                          </button>
+                          <button className="px-2 py-1 border rounded" onClick={saveEdit}>Save</button>
+                          <button className="px-2 py-1 border rounded" onClick={() => { setEditingId(null); setEdit(null); }}>Cancel</button>
                         </div>
                       ) : (
                         <div className="flex gap-2">
-                          <button className="px-2 py-1 border rounded" onClick={() => startEdit(r)}>
-                            Edit
-                          </button>
-                          <button
-                            className="px-2 py-1 border rounded text-red-600"
-                            onClick={() => remove(r.id)}
-                          >
-                            Remove
-                          </button>
+                          <button className="px-2 py-1 border rounded" onClick={() => startEdit(r)}>Edit</button>
+                          <button className="px-2 py-1 border rounded text-red-600" onClick={() => remove(r.id)}>Remove</button>
                         </div>
                       )}
                     </td>
@@ -429,17 +406,12 @@ export default function Morts() {
                 );
               })}
               {shedRows.length === 0 && (
-                <tr>
-                  <td className="py-6 text-gray-500" colSpan={8}>
-                    No entries for this shed.
-                  </td>
-                </tr>
+                <tr><td className="py-6 text-gray-500" colSpan={8}>No entries for this shed.</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
-      {/* (Second breakdown removed) */}
     </div>
   );
 }
