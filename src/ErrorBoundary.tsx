@@ -1,27 +1,30 @@
-import { Component, ReactNode } from "react";
+import React from "react";
 
-type Props = { children: ReactNode };
-type State = { error?: Error };
+type State = { error: any };
+export default class ErrorBoundary extends React.Component<React.PropsWithChildren, State> {
+  state: State = { error: null };
 
-export default class ErrorBoundary extends Component<Props, State> {
-  state: State = {};
-  static getDerivedStateFromError(error: Error) { return { error }; }
-  componentDidCatch(error: Error, info: any) {
-    console.error("ErrorBoundary caught", error, info);
+  static getDerivedStateFromError(error: any) {
+    return { error };
   }
+  componentDidCatch(error: any, info: any) {
+    // Visible in production console
+    console.error("App crashed:", error, info);
+  }
+
   render() {
     if (this.state.error) {
+      const message = (this.state.error?.message || String(this.state.error));
       return (
-        <div className="max-w-2xl mx-auto p-6">
-          <div className="card p-6">
-            <h1 className="text-xl font-semibold mb-3">Something went wrong</h1>
-            <p className="text-sm text-slate-600 mb-3">
-              The app hit an unexpected error. The technical message is below to help with debugging.
-            </p>
-            <pre className="p-3 rounded-xl bg-slate-900 text-slate-100 overflow-auto text-xs">
-{String(this.state.error?.message || this.state.error)}
-            </pre>
-          </div>
+        <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
+          <h1 style={{ fontSize: 20, marginBottom: 12 }}>Something went wrong</h1>
+          <div style={{ marginBottom: 12, color: "#b91c1c" }}>{message}</div>
+          <pre style={{ whiteSpace: "pre-wrap", background: "#f8fafc", padding: 12, borderRadius: 8 }}>
+            {this.state.error?.stack || ""}
+          </pre>
+          <button onClick={() => location.reload()} style={{ padding: "8px 12px", border: "1px solid #cbd5e1", borderRadius: 8 }}>
+            Reload
+          </button>
         </div>
       );
     }
