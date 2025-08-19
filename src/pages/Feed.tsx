@@ -1,155 +1,254 @@
-// src/pages/Feed.tsx
-import { useMemo, useEffect, useRef, useState } from "react";
-import { useFarm } from "../lib/FarmContext";
-import { useServerState } from "../lib/serverState";
-import { login, signup, me } from "../lib/session";
+import { useMemo, useState } from "react";
+import { useCloudSlice } from "../lib/cloudSlice";
 
-/**
- * IMPORTANT:
- * - This file is a LEAF PAGE. It intentionally does NOT render a layout (no header/sidebar, no <Outlet/>).
- * - Your global layout in src/App.tsx wraps this page, so it will look the same as your other pages.
- * - We keep auth helpers here (same imports and logic) so nothing is “lost,” but we do NOT render a second login modal.
- */
+type FeedType = "Starter" | "Grower" | "Finisher";
+const FEED_TYPES: FeedType[] = ["Starter", "Grower", "Finisher"];
 
-/** Optional auth helper hook (keeps your login/signup logic available without rendering a second modal) */
-export function useFeedAuthHelpers() {
-  const { state: user, setState: setUser } =
-    useServerState<{ email: string } | null>("user", null);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const emailRef = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
+type SiloRow = {
+id: string;
+name: string;
+type: FeedType;
+capacityT?: number;   // optional so placeholder can show
+levelT?: number;      // optional so placeholder can show
+notes?: string;
+};
 
-  const emailOk = /\S+@\S+\.\S+/.test(email);
-  const passOk = password.length >= 6;
-
-  function showError(msg: string, focus: "email" | "password" = "password") {
-    setError(msg);
-    requestAnimationFrame(() =>
-      (focus === "password" ? passwordRef : emailRef).current?.focus()
-    );
-  }
-
-  async function doLogin() {
-    if (!emailOk || !passOk)
-      return showError(
-        "Email and password (6+ chars) required",
-        !emailOk ? "email" : "password"
-      );
-    setBusy(true);
-    setError(null);
-    try {
-      await login(email, password);
-      const u = await me();
-      setUser(u?.email ? u : null);
-      setEmail("");
-      setPassword("");
-    } catch (e: any) {
-      showError(e?.message || "Invalid email or password");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function doSignup() {
-    if (!emailOk || !passOk)
-      return showError(
-        "Email and password (6+ chars) required",
-        !emailOk ? "email" : "password"
-      );
-    setBusy(true);
-    setError(null);
-    try {
-      await signup(email, password);
-      const u = await me();
-      setUser(u?.email ? u : null);
-      setEmail("");
-      setPassword("");
-    } catch (e: any) {
-      const msg = String(e?.message || "");
-      showError(
-        /already exists/i.test(msg)
-          ? "Account already exists — please Log in instead."
-          : msg || "Sign up failed",
-        /exists/i.test(msg) ? "email" : "password"
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  // Expose helpers/state if you need them for page-level forms
-  return {
-    user,
-    email,
-    setEmail,
-    password,
-    setPassword,
-    busy,
-    error,
-    doLogin,
-    doSignup,
-    emailRef,
-    passwordRef,
-  };
+function newId() {
+return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+function emptyRow(): SiloRow {
+return { id: newId(), name: "", type: "Starter", capacityT: undefined, levelT: undefined, notes: "" };
 }
 
-/** Feed leaf page (no nested layout) */
 export default function Feed() {
-  const { farms = [], farmId } = (useFarm() as any) ?? {};
+const [rows, setRows] = useCloudSlice<SiloRow[]>("feedSilos", []);
+const [draft, setDraft] = useState<SiloRow>(emptyRow());
+const [editingId, setEditingId] = useState<string | null>(null);
+const [edit, setEdit] = useState<SiloRow | null>(null);
 
-  // Derive the selected farm robustly (handles string/number id mismatch, falls back to first)
-  const currentFarm = useMemo(() => {
-    if (!Array.isArray(farms) || farms.length === 0) return null;
-    const match = farms.find((f: any) => String(f?.id) === String(farmId));
-    return match ?? farms[0] ?? null;
-  }, [farms, farmId]);
+const sorted = useMemo(
+() => [...rows].sort((a, b) => a.name.localeCompare(b.name)),
+[rows]
+);
 
-  const farmLabel =
-    currentFarm?.name ||
-    (currentFarm?.id != null ? `Farm ${String(currentFarm.id).slice(0, 4)}` : "");
+const totals = useMemo(() => {
+const cap = rows.reduce((s, r) => s + (Number(r.capacityT) || 0), 0);
+const lvl = rows.reduce((s, r) => s + (Number(r.levelT) || 0), 0);
+return { cap, lvl, pct: cap > 0 ? Math.round((lvl / cap) * 100) : 0 };
+}, [rows]);
 
-  // If you previously showed any feed-specific effects on mount, keep them here.
-  useEffect(() => {
-    // e.g., prefetch feed data for the selected farm, etc.
-    // (Left empty to avoid altering behavior unless you need it.)
-  }, [currentFarm?.id]);
+function clampNum(n: any) {
+const v = Number(n);
+return Number.isFinite(v) ? v : 0;
+}
 
-  return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Feed</h1>
+const addRow = () => {
+if (!draft.name.trim()) return;
+const cleaned: SiloRow = {
+...draft,
+id: draft.id || newId(),
+capacityT: clampNum(draft.capacityT ?? 0),
+levelT: Math.max(0, Math.min(clampNum(draft.levelT ?? 0), clampNum(draft.capacityT ?? 0))),
+type: FEED_TYPES.includes(draft.type) ? draft.type : "Starter",
+};
+setRows(prev => [...(prev || []), cleaned]);
+setDraft(emptyRow());
+};
 
-      <p className="text-sm text-slate-600">
-        {currentFarm ? `Current farm: ${farmLabel}` : "Select a farm to manage feed."}
-      </p>
+const startEdit = (r: SiloRow) => {
+setEditingId(r.id);
+setEdit({ ...r });
+};
 
-      {/* 
-        ======================================
-        FEED-SPECIFIC CONTENT AREA (unchanged)
-        ======================================
-        Paste/keep your feed widgets here (the ones you had before):
-        - Silo level tracking
-        - Intake logs
-        - Reorder calculator
-        - Charts/tables/forms
-        Avoid adding a header/sidebar/<Outlet/> here; the global layout already wraps this page.
-      */}
-      <section className="card p-4 space-y-4">
-        {/* Example placeholder—replace with your actual widgets */}
-        <div className="space-y-1">
-          <h2 className="font-medium">Feed tools</h2>
-          <p className="text-slate-700 text-sm">
-            Your existing feed UI goes here. This page no longer renders a second layout, so the mini window issue is gone.
-          </p>
-        </div>
+const saveEdit = () => {
+if (!edit) return;
+const cleaned: SiloRow = {
+...edit,
+name: (edit.name || "").trim(),
+capacityT: clampNum(edit.capacityT ?? 0),
+levelT: Math.max(0, Math.min(clampNum(edit.levelT ?? 0), clampNum(edit.capacityT ?? 0))),
+type: FEED_TYPES.includes(edit.type) ? edit.type : "Starter",
+};
+if (!cleaned.name) return;
+setRows(prev => prev.map(r => (r.id === cleaned.id ? cleaned : r)));
+setEditingId(null);
+setEdit(null);
+};
 
-        {/* If you had feed components defined in this file before, re-add them here or import them. */}
-        {/* <SiloLevels farm={currentFarm} /> */}
-        {/* <FeedIntakeLog farmId={currentFarm?.id} /> */}
-        {/* <ReorderCalculator farm={currentFarm} /> */}
-      </section>
-    </div>
-  );
+const remove = (id: string) => {
+if (!confirm("Remove this silo?")) return;
+setRows(prev => prev.filter(r => r.id !== id));
+};
+
+return (
+<div className="p-4 space-y-6">
+<div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Feed Silos</h1>
+        <h1 className="text-2xl font-semibold">Feed</h1>
+<div className="text-sm text-slate-600">
+Total: {totals.lvl.toFixed(1)} / {totals.cap.toFixed(1)} t ({totals.pct}%)
+</div>
+</div>
+
+{/* Add form */}
+<div className="p-4 border rounded-2xl bg-white">
+<div className="font-medium mb-3">Add silo</div>
+<div className="grid md:grid-cols-6 gap-3">
+<div className="md:col-span-2">
+<label className="block text-sm mb-1">Silo name</label>
+<input
+className="w-full border rounded px-2 py-1"
+placeholder="e.g., Silo 1"
+value={draft.name}
+onChange={e => setDraft({ ...draft, name: e.target.value })}
+/>
+</div>
+
+<div>
+<label className="block text-sm mb-1">Feed type</label>
+<select
+className="w-full border rounded px-2 py-1"
+value={draft.type}
+onChange={e => setDraft({ ...draft, type: (e.target.value as FeedType) })}
+>
+{FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+</select>
+</div>
+
+<div>
+<label className="block text-sm mb-1">Capacity (t)</label>
+<input
+type="number" min={0} step="0.01"
+className="w-full border rounded px-2 py-1 placeholder-transparent"
+placeholder="0"
+value={draft.capacityT ?? ""}
+onChange={e => setDraft({ ...draft, capacityT: e.target.value === "" ? undefined : clampNum(e.target.value) })}
+/>
+</div>
+
+<div>
+<label className="block text-sm mb-1">Level (t)</label>
+<input
+type="number" min={0} step="0.01"
+className="w-full border rounded px-2 py-1 placeholder-transparent"
+placeholder="0"
+value={draft.levelT ?? ""}
+onChange={e => setDraft({ ...draft, levelT: e.target.value === "" ? undefined : clampNum(e.target.value) })}
+/>
+</div>
+
+<div className="md:col-span-2">
+<label className="block text-sm mb-1">Notes</label>
+<input
+className="w-full border rounded px-2 py-1"
+value={draft.notes ?? ""}
+onChange={e => setDraft({ ...draft, notes: e.target.value })}
+/>
+</div>
+</div>
+
+<div className="mt-3">
+<button className="px-4 py-2 rounded bg-black text-white" onClick={addRow}>
+Add
+</button>
+</div>
+</div>
+
+{/* Table */}
+<div className="p-4 border rounded-2xl bg-white">
+<div className="overflow-x-auto">
+<table className="w-full text-sm">
+<thead>
+<tr className="text-left border-b">
+<th className="py-2 pr-2">Silo</th>
+<th className="py-2 pr-2">Type</th>
+<th className="py-2 pr-2">Capacity (t)</th>
+<th className="py-2 pr-2">Level (t)</th>
+<th className="py-2 pr-2">Notes</th>
+<th className="py-2 pr-2">Actions</th>
+</tr>
+</thead>
+<tbody>
+{sorted.map(r => (
+<tr key={r.id} className="border-b">
+<td className="py-2 pr-2">
+{editingId === r.id ? (
+<input
+className="border rounded px-2 py-1"
+value={edit?.name || ""}
+onChange={e => setEdit(s => ({ ...(s as SiloRow), name: e.target.value }))}
+/>
+) : r.name}
+</td>
+
+<td className="py-2 pr-2">
+{editingId === r.id ? (
+<select
+className="border rounded px-2 py-1"
+value={edit?.type || "Starter"}
+onChange={e => setEdit(s => ({ ...(s as SiloRow), type: e.target.value as FeedType }))}
+>
+{FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+</select>
+) : r.type}
+</td>
+
+<td className="py-2 pr-2">
+{editingId === r.id ? (
+<input
+type="number" min={0} step="0.01"
+className="border rounded px-2 py-1 placeholder-transparent"
+placeholder="0"
+value={edit?.capacityT ?? ""}
+onChange={e => setEdit(s => ({ ...(s as SiloRow), capacityT: e.target.value === "" ? undefined : clampNum(e.target.value) }))}
+/>
+) : (r.capacityT != null ? r.capacityT.toFixed(2) : "—")}
+</td>
+
+<td className="py-2 pr-2">
+{editingId === r.id ? (
+<input
+type="number" min={0} step={0.01}
+className="border rounded px-2 py-1 placeholder-transparent"
+placeholder="0"
+value={edit?.levelT ?? ""}
+onChange={e => setEdit(s => ({ ...(s as SiloRow), levelT: e.target.value === "" ? undefined : clampNum(e.target.value) }))}
+/>
+) : (r.levelT != null ? r.levelT.toFixed(2) : "—")}
+</td>
+
+<td className="py-2 pr-2">
+{editingId === r.id ? (
+<input
+className="border rounded px-2 py-1"
+value={edit?.notes || ""}
+onChange={e => setEdit(s => ({ ...(s as SiloRow), notes: e.target.value }))}
+/>
+) : (r.notes || "")}
+</td>
+
+<td className="py-2 pr-2">
+{editingId === r.id ? (
+<div className="flex gap-2">
+<button className="px-2 py-1 border rounded" onClick={saveEdit}>Save</button>
+<button className="px-2 py-1 border rounded" onClick={() => { setEditingId(null); setEdit(null); }}>Cancel</button>
+</div>
+) : (
+<div className="flex gap-2">
+<button className="px-2 py-1 border rounded" onClick={() => startEdit(r)}>Edit</button>
+<button className="px-2 py-1 border rounded text-red-600" onClick={() => remove(r.id)}>Remove</button>
+</div>
+)}
+</td>
+</tr>
+))}
+{sorted.length === 0 && (
+<tr><td className="py-6 text-gray-500" colSpan={6}>No silos yet.</td></tr>
+)}
+</tbody>
+</table>
+</div>
+</div>
+</div>
+);
 }
