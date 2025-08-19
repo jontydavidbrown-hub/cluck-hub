@@ -138,7 +138,7 @@ function MobileDrawer({ open, onClose }: { open: boolean; onClose: () => void })
 
   const links = [
     { to: "/", label: "Dashboard" }, { to: "/morts", label: "Morts" }, { to: "/weights", label: "Weights" },
-    { to: "/feed", label: "Feed Silos" }, { to: "/water", label: "Water" }, { to: "/reminders", label: "Reminders" },
+    { to: "/feed", label: "Feed" }, { to: "/water", label: "Water" }, { to: "/reminders", label: "Reminders" },
     { to: "/setup", label: "Setup" }, { to: "/Farms", label: "Farms" }, { to: "/user", label: "User" },
   ];
   return (
