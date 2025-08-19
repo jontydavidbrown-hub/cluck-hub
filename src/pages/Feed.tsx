@@ -83,7 +83,6 @@ setRows(prev => prev.filter(r => r.id !== id));
 return (
 <div className="p-4 space-y-6">
 <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Feed Silos</h1>
         <h1 className="text-2xl font-semibold">Feed</h1>
 <div className="text-sm text-slate-600">
 Total: {totals.lvl.toFixed(1)} / {totals.cap.toFixed(1)} t ({totals.pct}%)
