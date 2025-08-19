@@ -1,9 +1,9 @@
 // src/App.tsx
 import { Outlet, NavLink, useLocation } from "react-router-dom";
 import { useMemo, useEffect, useRef, useState } from "react";
-import { useFarm } from "./lib/FarmContext";
-import { useServerState } from "./lib/serverState";
-import { login, signup, me } from "./lib/session";
+import { useFarm } from "../lib/FarmContext";
+import { useServerState } from "../lib/serverState";
+import { login, signup, me } from "../lib/session";
 
 function LoginLightboxInline() {
   const { state: user, setState: setUser } = useServerState<{ email: string } | null>("user", null);
