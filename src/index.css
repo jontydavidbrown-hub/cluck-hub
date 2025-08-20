@@ -68,18 +68,30 @@ input[type="number"]::placeholder { color: transparent; opacity: 0; }
   .control-full { max-width: none !important; }
 }
 
-/* Content-sized sections + centered titles */
+/* Auto-compact cards that contain small forms; center their titles */
 @layer components {
-  /* Make a section wrap exactly its contents and center it horizontally */
-  .section-compact {
+  /* Opt-out helper: keep a card full-width */
+  .section-full { width: auto !important; max-width: none !important; margin-inline: 0 !important; }
+  .section-title-left { text-align: left !important; }
+
+  /* Detect common card shells (your code uses both plain card shells and .card) */
+  .p-4.border.rounded-2xl.bg-white:has(> form):not(:has(table)):not(.section-full),
+  .card:has(> form):not(:has(table)):not(.section-full),
+  /* also compact when you use the utility row .form-center */
+  .p-4.border.rounded-2xl.bg-white:has(.form-center):not(.section-full),
+  .card:has(.form-center):not(.section-full) {
     width: -moz-fit-content;
     width: fit-content;
     max-width: 100%;
     margin-left: auto;
     margin-right: auto;
   }
-  /* Center the section heading text */
-  .section-title-center {
+
+  /* Center the first title line in those compact sections */
+  .p-4.border.rounded-2xl.bg-white:has(> form):not(:has(table)) > .font-medium:first-child,
+  .card:has(> form):not(:has(table)) > .font-medium:first-child,
+  .p-4.border.rounded-2xl.bg-white:has(.form-center) > .font-medium:first-child,
+  .card:has(.form-center) > .font-medium:first-child {
     text-align: center;
   }
 }
