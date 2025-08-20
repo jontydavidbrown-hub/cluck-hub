@@ -1,9 +1,6 @@
-// src/pages/Farms.tsx
 import { useEffect, useMemo, useState } from "react";
 import { useFarm } from "../lib/FarmContext";
 import { useCloudSlice } from "../lib/cloudSlice";
-import React, { useState } from "react";
-import { useFarms } from "../lib/FarmContext";
 
 type Farm = { id: string; name?: string };
 type MemberRole = "owner" | "admin" | "manager" | "worker" | "viewer";
@@ -15,23 +12,32 @@ type Member = {
 };
 
 const roleOptions: { value: MemberRole; label: string; desc: string }[] = [
-  { value: "owner",   label: "Owner",   desc: "Full control. Can manage billing and owners." },
-  { value: "admin",   label: "Admin",   desc: "Manage farms, members, and all data." },
+  { value: "owner", label: "Owner", desc: "Full control. Can manage billing and owners." },
+  { value: "admin", label: "Admin", desc: "Manage farms, members, and all data." },
   { value: "manager", label: "Manager", desc: "Add/edit operational data, invite workers." },
-  { value: "worker",  label: "Worker",  desc: "Add/edit data (morts, weights, feed, water)." },
-  { value: "viewer",  label: "Viewer",  desc: "Read-only access to dashboards and records." },
+  { value: "worker", label: "Worker", desc: "Add/edit data (morts, weights, feed, water)." },
+  { value: "viewer", label: "Viewer", desc: "Read-only access to dashboards and records." },
 ];
 
 // Fallback storage key in Blobs if /members function is not available
 const membersBlobKey = (farmId: string) => `farm/${farmId}/members`;
 
-async function fetchJson<T = any>(input: RequestInfo, init?: RequestInit): Promise<{ ok: boolean; status: number; data?: T; errorText?: string; }> {
+async function fetchJson<T = any>(
+  input: RequestInfo,
+  init?: RequestInit
+): Promise<{ ok: boolean; status: number; data?: T; errorText?: string }> {
   try {
     const res = await fetch(input, { credentials: "include", ...init });
     const ct = res.headers.get("content-type") || "";
     const isJSON = ct.includes("application/json");
     const data = isJSON ? await res.json() : undefined;
-    if (!res.ok) return { ok: false, status: res.status, data, errorText: (data as any)?.error || res.statusText };
+    if (!res.ok)
+      return {
+        ok: false,
+        status: res.status,
+        data,
+        errorText: (data as any)?.error || res.statusText,
+      };
     return { ok: true, status: res.status, data };
   } catch (e: any) {
     return { ok: false, status: 0, errorText: e?.message || "Network error" };
@@ -59,6 +65,7 @@ export default function Farms() {
       setBusyFarm(false);
     }
   }
+
   async function onDeleteFarm(id: string) {
     if (!confirm("Are you sure you want to delete this farm? This cannot be undone.")) return;
     await deleteFarm?.(id);
@@ -75,14 +82,17 @@ export default function Farms() {
   const [inviting, setInviting] = useState(false);
   const emailOk = /\S+@\S+\.\S+/.test(inviteEmail);
 
-  // Cloud slice only used to force a refresh when others change farms elsewhere (keeps device sync smooth)
-  // We won’t store members here, but reading it ensures FarmContext blob exists; harmless no-op
+  // Cloud slice only used to force a refresh when others change farms elsewhere
   const [dummy] = useCloudSlice("farms_dummy_sync", 0);
 
   async function loadMembers() {
-    if (!farmId) { setMembers([]); return; }
+    if (!farmId) {
+      setMembers([]);
+      return;
+    }
     setLoadingMembers(true);
     setMembersError(null);
+
     // Try primary serverless function
     const url = `/.netlify/functions/members?farmId=${encodeURIComponent(farmId)}`;
     const res = await fetchJson<{ members: Member[] }>(url);
@@ -91,13 +101,17 @@ export default function Farms() {
       setLoadingMembers(false);
       return;
     }
+
     // Fallback to Blobs key
-    const fb = await fetchJson<{ value?: Member[] }>(`/.netlify/functions/data?key=${encodeURIComponent(membersBlobKey(farmId))}`);
+    const fb = await fetchJson<{ value?: Member[] }>(
+      `/.netlify/functions/data?key=${encodeURIComponent(membersBlobKey(farmId))}`
+    );
     if (fb.ok && Array.isArray(fb.data?.value)) {
       setMembers(fb.data!.value!);
       setLoadingMembers(false);
       return;
     }
+
     setMembersError(res.errorText || fb.errorText || "Failed to load members");
     setLoadingMembers(false);
   }
@@ -106,9 +120,6 @@ export default function Farms() {
     loadMembers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [farmId, dummy]);
-const Farms: React.FC = () => {
-  const { farms, addFarm } = useFarms();
-  const [farmName, setFarmName] = useState("");
 
   async function saveMembersFallback(next: Member[]) {
     if (!farmId) return;
@@ -125,6 +136,7 @@ const Farms: React.FC = () => {
     if (!emailOk) return alert("Please enter a valid email address.");
     setInviting(true);
     setMembersError(null);
+
     // Try serverless function
     const res = await fetchJson<{ members: Member[] }>(`/.netlify/functions/members`, {
       method: "POST",
@@ -132,6 +144,7 @@ const Farms: React.FC = () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "invite", farmId, email: inviteEmail.trim(), role: inviteRole }),
     });
+
     if (res.ok) {
       setInviteEmail("");
       setInviteRole("viewer");
@@ -139,11 +152,17 @@ const Farms: React.FC = () => {
       setInviting(false);
       return;
     }
+
     // Fallback: write to Blobs
     try {
       const next: Member[] = [
         ...members,
-        { id: crypto.randomUUID?.() ?? String(Math.random()).slice(2), email: inviteEmail.trim(), role: inviteRole, status: "invited" },
+        {
+          id: crypto.randomUUID?.() ?? String(Math.random()).slice(2),
+          email: inviteEmail.trim(),
+          role: inviteRole,
+          status: "invited",
+        },
       ];
       await saveMembersFallback(next);
       setMembers(next);
@@ -158,16 +177,20 @@ const Farms: React.FC = () => {
 
   async function changeRole(memberId: string, role: MemberRole) {
     if (!farmId) return;
-    // Try function
+
     const res = await fetchJson<{ members: Member[] }>(`/.netlify/functions/members`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "updateRole", farmId, memberId, role }),
     });
-    if (res.ok) { setMembers(res.data?.members || []); return; }
-    // Fallback
-    const next = members.map(m => m.id === memberId ? { ...m, role } : m);
+
+    if (res.ok) {
+      setMembers(res.data?.members || []);
+      return;
+    }
+
+    const next = members.map((m) => (m.id === memberId ? { ...m, role } : m));
     await saveMembersFallback(next);
     setMembers(next);
   }
@@ -175,26 +198,25 @@ const Farms: React.FC = () => {
   async function removeMember(memberId: string) {
     if (!farmId) return;
     if (!confirm("Remove this member from the farm?")) return;
-    // Try function
+
     const res = await fetchJson<{ members: Member[] }>(`/.netlify/functions/members`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "remove", farmId, memberId }),
     });
-    if (res.ok) { setMembers(res.data?.members || []); return; }
-    // Fallback
-    const next = members.filter(m => m.id !== memberId);
+
+    if (res.ok) {
+      setMembers(res.data?.members || []);
+      return;
+    }
+
+    const next = members.filter((m) => m.id !== memberId);
     await saveMembersFallback(next);
     setMembers(next);
   }
-  const handleAdd = async () => {
-    if (!farmName.trim()) return;
-    await addFarm(farmName.trim());
-    setFarmName("");
-  };
 
-return (
+  return (
     <div className="animate-fade-slide space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-semibold">Farms</h1>
@@ -207,14 +229,16 @@ return (
               onChange={(e) => setFarmId?.(e.target.value)}
             >
               {farmsSorted.map((f: Farm) => (
-                <option key={f.id} value={f.id}>{f.name || "Farm " + String(f.id).slice(0, 4)}</option>
+                <option key={f.id} value={f.id}>
+                  {f.name || "Farm " + String(f.id).slice(0, 4)}
+                </option>
               ))}
             </select>
           </div>
         )}
       </div>
 
-      {/* Your farms */}
+      {/* Farms List */}
       <div className="grid md:grid-cols-2 gap-4">
         <div className="p-4 rounded-xl border bg-white space-y-2">
           <div className="text-sm font-medium text-center">Your farms</div>
@@ -226,15 +250,25 @@ return (
                 </span>
                 <div className="flex items-center gap-2">
                   {f.id !== farmId && (
-                    <button className="text-xs rounded border px-2 py-1 hover:bg-slate-50" onClick={() => setFarmId?.(f.id)}>Switch</button>
+                    <button
+                      className="text-xs rounded border px-2 py-1 hover:bg-slate-50"
+                      onClick={() => setFarmId?.(f.id)}
+                    >
+                      Switch
+                    </button>
                   )}
-                  <button className="text-xs rounded border px-2 py-1 hover:bg-red-50 text-red-600" onClick={() => onDeleteFarm(f.id)}>
+                  <button
+                    className="text-xs rounded border px-2 py-1 hover:bg-red-50 text-red-600"
+                    onClick={() => onDeleteFarm(f.id)}
+                  >
                     Delete
                   </button>
                 </div>
               </li>
             ))}
-            {(!farms || farms.length === 0) && <li className="text-slate-500 text-center">No farms yet.</li>}
+            {(!farms || farms.length === 0) && (
+              <li className="text-slate-500 text-center">No farms yet.</li>
+            )}
           </ul>
         </div>
 
@@ -246,10 +280,15 @@ return (
               placeholder="Farm name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") onCreateFarm(); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onCreateFarm();
+              }}
             />
-            <button className="rounded bg-slate-900 text-white px-4 py-2 disabled:opacity-60"
-              disabled={busyFarm || !newName.trim()} onClick={onCreateFarm}>
+            <button
+              className="rounded bg-slate-900 text-white px-4 py-2 disabled:opacity-60"
+              disabled={busyFarm || !newName.trim()}
+              onClick={onCreateFarm}
+            >
               Create
             </button>
           </div>
@@ -257,24 +296,7 @@ return (
             New farms are shared with members you invite below.
           </p>
         </div>
-    <div className="p-4">
-      <h1 className="text-xl font-bold mb-4">Farms</h1>
-
-      <div className="flex gap-2 mb-4">
-        <input
-          type="text"
-          className="border p-2 flex-1"
-          placeholder="Enter farm name"
-          value={farmName}
-          onChange={(e) => setFarmName(e.target.value)}
-        />
-        <button
-          className="bg-green-600 text-white px-4 py-2 rounded"
-          onClick={handleAdd}
-        >
-          Add Farm
-        </button>
-</div>
+      </div>
 
       {/* Members */}
       <div className="p-4 rounded-xl border bg-white space-y-4">
@@ -290,7 +312,9 @@ return (
               placeholder="person@example.com"
               value={inviteEmail}
               onChange={(e) => setInviteEmail(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && emailOk && !inviting) invite(); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && emailOk && !inviting) invite();
+              }}
             />
           </label>
           <label className="block">
@@ -300,7 +324,7 @@ return (
               value={inviteRole}
               onChange={(e) => setInviteRole(e.target.value as MemberRole)}
             >
-              {roleOptions.map(r => (
+              {roleOptions.map((r) => (
                 <option key={r.value} value={r.value}>
                   {r.label} — {r.desc}
                 </option>
@@ -318,8 +342,10 @@ return (
             </button>
           </div>
         </div>
+
         <p className="text-xs text-slate-500">
-          Owners/Admins can manage everything. Managers can invite workers and edit data. Workers can add/edit operational data. Viewers are read-only.
+          Owners/Admins can manage everything. Managers can invite workers and edit data. Workers can add/edit
+          operational data. Viewers are read-only.
         </p>
 
         {/* Members table */}
@@ -335,34 +361,46 @@ return (
             </thead>
             <tbody>
               {loadingMembers && (
-                <tr><td colSpan={4} className="py-4 text-slate-500">Loading members…</td></tr>
-              )}
-              {!loadingMembers && members.map((m) => (
-                <tr key={m.id} className="border-b">
-                  <td className="py-2 pr-2">{m.email}</td>
-                  <td className="py-2 pr-2">
-                    <select
-                      className="border rounded px-2 py-1"
-                      value={m.role}
-                      onChange={(e) => changeRole(m.id, e.target.value as MemberRole)}
-                    >
-                      {roleOptions.map(r => (
-                        <option key={r.value} value={r.value}>
-                          {r.label} — {r.desc}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="py-2 pr-2">{m.status || "active"}</td>
-                  <td className="py-2 pr-2">
-                    <button className="px-2 py-1 border rounded text-red-600" onClick={() => removeMember(m.id)}>
-                      Remove
-                    </button>
+                <tr>
+                  <td colSpan={4} className="py-4 text-slate-500">
+                    Loading members…
                   </td>
                 </tr>
-              ))}
+              )}
+              {!loadingMembers &&
+                members.map((m) => (
+                  <tr key={m.id} className="border-b">
+                    <td className="py-2 pr-2">{m.email}</td>
+                    <td className="py-2 pr-2">
+                      <select
+                        className="border rounded px-2 py-1"
+                        value={m.role}
+                        onChange={(e) => changeRole(m.id, e.target.value as MemberRole)}
+                      >
+                        {roleOptions.map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {r.label} — {r.desc}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="py-2 pr-2">{m.status || "active"}</td>
+                    <td className="py-2 pr-2">
+                      <button
+                        className="px-2 py-1 border rounded text-red-600"
+                        onClick={() => removeMember(m.id)}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               {!loadingMembers && members.length === 0 && (
-                <tr><td colSpan={4} className="py-4 text-slate-500">No members yet.</td></tr>
+                <tr>
+                  <td colSpan={4} className="py-4 text-slate-500">
+                    No members yet.
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
@@ -370,18 +408,6 @@ return (
 
         {membersError && <div className="text-sm text-red-600">{membersError}</div>}
       </div>
-      {farms.length === 0 ? (
-        <p className="text-gray-500">No farms added yet.</p>
-      ) : (
-        <ul className="list-disc pl-6">
-          {farms.map((farm) => (
-            <li key={farm.id}>{farm.name}</li>
-          ))}
-        </ul>
-      )}
-</div>
-);
+    </div>
+  );
 }
-};
-
-export default Farms;
