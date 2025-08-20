@@ -1,292 +1,227 @@
 // src/pages/Dashboard.tsx
 import { useMemo } from "react";
-import { useCloudSlice } from "../lib/cloudSlice";
 import { useNavigate } from "react-router-dom";
-import { estimateShedFeedKgToday } from "../lib/rossFeed";
+import { useCloudSlice } from "../lib/cloudSlice";
 
+type Settings = { batchLengthDays?: number };
 type Shed = {
   id: string;
   name: string;
-  placementDate?: string;      // YYYY-MM-DD
-  placementBirds?: number;     // legacy
-  birdsPlaced?: number;        // current
+  placementDate?: string;   // YYYY-MM-DD
+  placementBirds?: number;  // legacy
+  birdsPlaced?: number;     // current
 };
 
-// Daily log rows may come from multiple pages with different shapes,
-// so declare everything we might read (compat-friendly).
-type DailyLogRow = {
+// Morts rows (supports both legacy Daily Log and new Morts schema)
+type MortsRow = {
   id: string;
-  date: string;                // YYYY-MM-DD
-  shed?: string;
-
-  // From Morts page (structured)
-  morts?: number;              // natural deaths (only)
+  date: string;          // YYYY-MM-DD
+  shed?: string;         // may be shed name
+  shedId?: string;       // optional if newer pages saved id
+  mortalities?: number;  // legacy "morts"
+  morts?: number;        // current "morts"
+  culls?: number;        // legacy combined culls
   cullRunts?: number;
   cullLegs?: number;
   cullNonStart?: number;
   cullOther?: number;
-  culls?: number;              // aggregated culls (compat)
-
-
-type Settings = {
-  batchLengthDays?: number;
 };
 
-function daysBetweenUTC(a?: string, b?: string) {
-  if (!a || !b) return 0;
-  const A = new Date(a + "T00:00:00Z").getTime();
-  const B = new Date(b + "T00:00:00Z").getTime();
-  return Math.floor((B - A) / (1000 * 60 * 60 * 24));
+const T_PER_KG = 0.001;
+
+// Approx daily feed per bird (grams) by age; coarse curve with piecewise linear fill
+function feedPerBirdG(age: number): number {
+  const pts = [
+    [1, 15], [7, 28], [14, 50], [21, 80], [28, 110], [35, 130], [42, 150],
+  ] as const;
+  if (age <= pts[0][0]) return pts[0][1];
+  for (let i = 1; i < pts.length; i++) {
+    const [d2, g2] = pts[i];
+    const [d1, g1] = pts[i - 1];
+    if (age <= d2) {
+      const t = (age - d1) / (d2 - d1);
+      return g1 + t * (g2 - g1);
+    }
+  }
+  // Flat after last point
+  return pts[pts.length - 1][1];
 }
 
-function cullsOnly(r: Partial<DailyLogRow>) {
-  if (typeof r.culls === "number") return Math.max(0, r.culls);
-  const sum =
-    (Number(r.cullRunts) || 0) +
-    (Number(r.cullLegs) || 0) +
-    (Number(r.cullNonStart) || 0) +
-    (Number(r.cullOther) || 0);
-  return Math.max(0, sum);
+function daysSince(iso?: string): number {
+  if (!iso) return 0;
+  const d0 = new Date(iso + "T00:00:00");
+  const d1 = new Date();
+  const diff = Math.floor((+d1 - +d0) / 86400000);
+  return Math.max(0, diff);
 }
 
-function mortsOnly(r: Partial<DailyLogRow>) {
-  return Math.max(0, Number(r.morts) || 0);
-}
+function num(v: any): number { return Number.isFinite(Number(v)) ? Number(v) : 0; }
 
 export default function Dashboard() {
   const navigate = useNavigate();
 
+  const [settings] = useCloudSlice<Settings>("settings", { batchLengthDays: 42 });
   const [sheds] = useCloudSlice<Shed[]>("sheds", []);
-  const [dailyLog] = useCloudSlice<DailyLogRow[]>("dailyLog", []);
-  const [settings] = useCloudSlice<Settings>("settings", {});
+  // Read from both possible keys and merge (supports your older Daily Log and newer Morts page)
+  const [mortsA] = useCloudSlice<MortsRow[]>("morts", []);
+  const [mortsB] = useCloudSlice<MortsRow[]>("dailyLog", []);
+  const mortsRows = useMemo(() => [...(mortsA || []), ...(mortsB || [])], [mortsA, mortsB]);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const batchLen = Math.max(1, Number(settings.batchLengthDays ?? 42));
+  const shedsSorted = useMemo(
+    () => [...(sheds || [])].sort((a, b) => (a?.name || "").localeCompare(b?.name || "")),
+    [sheds]
+  );
 
-  const { tiles, totals } = useMemo(() => {
-    const rows = dailyLog || [];
-
-    // Build three separate maps:
-    // - mortalitiesByShed: total mortalities (morts + culls) per shed
-    // - mortsOnlyByShed: morts-only per shed
-    // - cullsByShed: culls-only per shed
-    const mortsOnlyByShed = new Map<string, number>();
-    const cullsByShed = new Map<string, number>();
-
-    let totalMortsOnlyAll = 0;
-    let totalCullsOnlyAll = 0;
-
-    for (const r of rows) {
-      const key = (r.shed || "").trim();
-      if (!key) continue;
-
-      const mOnly = mortsOnly(r);
-      const cOnly = cullsOnly(r);
-
-      // Prefer explicit mortalities if present; otherwise derive from parts
-      const mortalitiesTotal =
-        typeof r.mortalities === "number"
-          ? Math.max(0, r.mortalities)
-          : mOnly + cOnly;
-
-      // Accumulate per-shed
-      mortsOnlyByShed.set(key, (mortsOnlyByShed.get(key) || 0) + mOnly);
-      cullsByShed.set(key, (cullsByShed.get(key) || 0) + cOnly);
-
-      // Accumulate totals
-      totalMortsOnlyAll += mOnly;
-      totalCullsOnlyAll += cOnly;
+  // Map shed -> totals
+  const perShed = useMemo(() => {
+    const map = new Map<string, {
+      shed: Shed;
+      age: number;
+      birdsPlaced: number;
+      morts: number;
+      culls: number;
+      remaining: number;
+      estFeedTonnes: number; // per day
+    }>();
+    for (const s of shedsSorted) {
+      const birdsPlaced = num(s.birdsPlaced ?? s.placementBirds);
+      const age = daysSince(s.placementDate) + 1; // day age (1-based)
+      // sum morts & culls for this shed
+      let morts = 0, culls = 0;
+      for (const r of mortsRows) {
+        const isThis =
+          (r.shedId && r.shedId === s.id) ||
+          (r.shed && s.name && r.shed.trim().toLowerCase() === s.name.trim().toLowerCase());
+        if (!isThis) continue;
+        morts += num(r.morts ?? r.mortalities);
+        const cullSum =
+          (r.culls != null ? num(r.culls) : 0) +
+          num(r.cullRunts) + num(r.cullLegs) + num(r.cullNonStart) + num(r.cullOther);
+        culls += cullSum;
+      }
+      const remaining = Math.max(0, birdsPlaced - morts - culls);
+      const gPerBird = feedPerBirdG(age);
+      const estFeedTonnes = remaining * gPerBird * T_PER_KG / 1000; // g -> kg -> t
+      map.set(s.id, { shed: s, age, birdsPlaced, morts, culls, remaining, estFeedTonnes });
     }
+    return map;
+  }, [shedsSorted, mortsRows]);
 
-    let totalPlacedBirdsAll = 0;
-    let totalRemainingBirdsAll = 0;
-    let totalFeedKgTodayAll = 0;
+  const totals = useMemo(() => {
+    let placed = 0, remaining = 0, allMorts = 0, allCulls = 0, estFeedT = 0;
+    for (const v of perShed.values()) {
+      placed += v.birdsPlaced;
+      remaining += v.remaining;
+      allMorts += v.morts;
+      allCulls += v.culls;
+      estFeedT += v.estFeedTonnes;
+    }
+    return { placed, remaining, allMorts, allCulls, estFeedT };
+  }, [perShed]);
 
-    const tiles = (sheds || [])
-      .map((s) => {
-        const shedName = s.name || "";
+  const batchLen = Math.max(1, num(settings.batchLengthDays || 42));
 
-        const placed = Number(s.birdsPlaced ?? s.placementBirds) || 0;
-        totalPlacedBirdsAll += placed;
-
-        const mOnly = mortsOnlyByShed.get(shedName) || 0;
-        const cOnly = cullsByShed.get(shedName) || 0;
-
-        // progress & age
-        let progressPct = 0;
-        let ageDays = 0;
-        if (s.placementDate) {
-          ageDays = daysBetweenUTC(s.placementDate, today);
-          progressPct = Math.min(
-            100,
-            Math.max(0, Math.round((ageDays / batchLen) * 100))
-          );
-        }
-
-        // live birds
-        const liveBirds = Math.max(0, placed - mortsTotal);
-        totalRemainingBirdsAll += liveBirds;
-
-        // estimate feed for this shed for "today"
-        const feedKgToday = s.placementDate
-          ? estimateShedFeedKgToday(ageDays, liveBirds)
-          : 0;
-        totalFeedKgTodayAll += feedKgToday;
-
-        return {
-          id: s.id,
-          name: shedName,
-          placementDate: s.placementDate || "",
-          birdsPlaced: placed || undefined,
-          progressPct,
-          ageDays: s.placementDate ? ageDays : undefined,
-          mortsOnly: mOnly,
-          cullsOnly: cOnly,
-          feedKgToday, // kg/day
-        };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    const totals = {
-      totalPlacedBirdsAll,
-      totalRemainingBirdsAll,
-      totalMortsOnlyAll,
-      totalCullsOnlyAll,
-      totalFeedKgTodayAll, // kg/day
-    };
-
-    return { tiles, totals };
-  }, [sheds, dailyLog, batchLen, today]);
-
-  function goAddWeights(name: string) {
-    const q = new URLSearchParams({ shed: name });
-    navigate(`/weights?${q.toString()}`);
+  function goAddWeights(s: Shed) {
+    const qs = new URLSearchParams();
+    qs.set("preselectShed", s.id);
+    qs.set("shedName", s.name || "");
+    navigate(`/weights?${qs.toString()}`);
   }
-
-  function goAddMorts(name: string) {
-    const q = new URLSearchParams({ shed: name, focus: "mortalities" });
-    navigate(`/morts?${q.toString()}`);
+  function goAddMorts(s: Shed) {
+    const qs = new URLSearchParams();
+    qs.set("preselectShed", s.id);
+    qs.set("shedName", s.name || "");
+    navigate(`/morts?${qs.toString()}`);
   }
 
   return (
-    <div className="p-4 space-y-6">
+    <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Dashboard</h1>
 
-      {/* Totals bar: 2 per row on mobile, 4 per row from sm+ */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      {/* Top totals tiles (mobile: 2 per row) */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="rounded border p-4 bg-white">
           <div className="text-xs text-slate-500">Total Placed Birds</div>
-          <div className="text-2xl font-semibold">
-            {totals.totalPlacedBirdsAll.toLocaleString()}
-          </div>
+          <div className="text-xl font-semibold mt-1">{totals.placed.toLocaleString()}</div>
         </div>
         <div className="rounded border p-4 bg-white">
           <div className="text-xs text-slate-500">Total Remaining Birds</div>
-          <div className="text-2xl font-semibold">
-            {totals.totalRemainingBirdsAll.toLocaleString()}
-          </div>
+          <div className="text-xl font-semibold mt-1">{totals.remaining.toLocaleString()}</div>
         </div>
         <div className="rounded border p-4 bg-white">
-          <div className="text-xs text-slate-500">Total Morts</div>
-          <div className="text-2xl font-semibold">
-          </div>
-          <div className="mt-1 text-xs text-slate-500">Morts / Culls</div>
-          <div className="text-lg font-semibold">
-            {totals.totalMortsOnlyAll.toLocaleString()}
-            {" / "}
-            {totals.totalCullsOnlyAll.toLocaleString()}
+          {/* >>> label changed here <<< */}
+          <div className="text-xs text-slate-500">Morts / Culls</div>
+          <div className="text-xl font-semibold mt-1">
+            {totals.allMorts.toLocaleString()}/{totals.allCulls.toLocaleString()}
           </div>
         </div>
         <div className="rounded border p-4 bg-white">
           <div className="text-xs text-slate-500">Est Feed Consumption</div>
-          <div className="text-2xl font-semibold">
-            {(totals.totalFeedKgTodayAll / 1000).toLocaleString(undefined, {
-              minimumFractionDigits: 1,
-              maximumFractionDigits: 1,
-            })}{" "}
-            t
+          <div className="text-xl font-semibold mt-1">
+            {totals.estFeedT.toLocaleString(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 })} t / day
           </div>
         </div>
       </div>
 
-      {tiles.length === 0 ? (
-        <div className="card p-6 text-slate-600">
-          No sheds yet. Add one in <span className="font-medium">Setup</span>.
-        </div>
-      ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {tiles.map((t) => (
-            <div key={t.id} className="card p-4 flex flex-col gap-3">
+      {/* Per-shed tiles */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {shedsSorted.map((s) => {
+          const v = perShed.get(s.id)!;
+          const pct = Math.min(100, Math.round((v.age / batchLen) * 100));
+          return (
+            <div key={s.id} className="rounded border p-4 bg-white">
               <div className="flex items-center justify-between">
-                <div className="text-lg font-semibold">{t.name || "—"}</div>
-                <div className="text-xs text-slate-500">
-                  {t.placementDate ? `Placed: ${t.placementDate}` : "Unplaced"}
-                </div>
+                <div className="font-medium truncate">{s.name || `Shed ${String(s.id).slice(0, 4)}`}</div>
+                <div className="text-xs text-slate-500">{pct}%</div>
               </div>
-
-              <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
+              <div className="mt-2 h-2 rounded bg-slate-100 overflow-hidden">
                 <div
-                  className="h-2 bg-slate-900 transition-[width] duration-500"
-                  style={{ width: `${t.progressPct}%` }}
-                  aria-label={`Batch progress ${t.progressPct}%`}
+                  className="h-full bg-gradient-to-r from-emerald-400 to-lime-500"
+                  style={{ width: `${pct}%` }}
                 />
               </div>
-              <div className="text-xs text-slate-600">
-                Batch progress: <span className="font-medium">{t.progressPct}%</span>
-              </div>
 
-              {/* Shed boxes */}
-              <div className="grid grid-cols-2 gap-3 text-sm">
+              {/* Stats row */}
+              <div className="mt-3 grid grid-cols-2 gap-2">
                 <div className="rounded border p-2">
-                  <div className="text-xs text-slate-500">Day Age</div>
-                  <div className="text-lg font-semibold">
-                    {typeof t.ageDays === "number" ? t.ageDays : "—"}
+                  <div className="text-[11px] text-slate-500">Day Age</div>
+                  <div className="text-sm font-medium">{v.age}</div>
+                </div>
+                <div className="rounded border p-2">
+                  <div className="text-[11px] text-slate-500">Birds Placed</div>
+                  <div className="text-sm font-medium">{v.birdsPlaced.toLocaleString()}</div>
+                </div>
+                <div className="rounded border p-2">
+                  {/* >>> label changed here <<< */}
+                  <div className="text-[11px] text-slate-500">Morts / Culls</div>
+                  <div className="text-sm font-medium">
+                    {v.morts.toLocaleString()}/{v.culls.toLocaleString()}
                   </div>
                 </div>
-
                 <div className="rounded border p-2">
-                  <div className="text-xs text-slate-500">Birds placed</div>
-                  <div className="text-lg font-semibold">{t.birdsPlaced ?? "—"}</div>
-                </div>
-
-                <div className="rounded border p-2">
-                  <div className="text-xs text-slate-500 mt-1">Morts / Culls</div>
-                  <div className="text-lg font-semibold">
-                    {t.mortsOnly}/{t.cullsOnly}
-                  </div>
-                </div>
-
-                <div className="rounded border p-2">
-                  <div className="text-xs text-slate-500">Est. feed today</div>
-                  <div className="text-lg font-semibold">
-                    {t.feedKgToday > 0
-                      ? `${(t.feedKgToday / 1000).toLocaleString(undefined, {
-                          minimumFractionDigits: 1,
-                          maximumFractionDigits: 1,
-                        })} t`
-                      : "—"}
+                  <div className="text-[11px] text-slate-500">Est Feed (t/day)</div>
+                  <div className="text-sm font-medium">
+                    {v.estFeedTonnes.toLocaleString(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 })}
                   </div>
                 </div>
               </div>
 
-              <div className="mt-1 flex gap-2">
-                <button
-                  className="px-3 py-1 rounded border hover:bg-slate-50"
-                  onClick={() => goAddWeights(t.name)}
-                >
+              {/* Actions */}
+              <div className="mt-3 flex items-center gap-2">
+                <button className="px-3 py-1.5 rounded border hover:bg-slate-50" onClick={() => goAddWeights(s)}>
                   Add Weights
                 </button>
-                <button
-                  className="px-3 py-1 rounded border hover:bg-slate-50"
-                  onClick={() => goAddMorts(t.name)}
-                >
+                <button className="px-3 py-1.5 rounded border hover:bg-slate-50" onClick={() => goAddMorts(s)}>
                   Add Morts
                 </button>
               </div>
             </div>
-          ))}
-        </div>
-      )}
+          );
+        })}
+        {shedsSorted.length === 0 && (
+          <div className="text-sm text-slate-600">No sheds configured yet. Add sheds in <span className="font-medium">Setup</span>.</div>
+        )}
+      </div>
     </div>
   );
 }
