@@ -3,7 +3,6 @@ import { useMemo } from "react";
 import { useCloudSlice } from "../lib/cloudSlice";
 import { useNavigate } from "react-router-dom";
 import { estimateShedFeedKgToday } from "../lib/rossFeed";
-import FeedStocktakeButton from "../components/FeedStocktakeButton";
 
 type Shed = {
   id: string;
@@ -182,11 +181,6 @@ export default function Dashboard() {
   return (
     <div className="p-4 space-y-6">
       <h1 className="text-2xl font-semibold">Dashboard</h1>
-
-      {/* Quick actions */}
-      <div className="flex flex-wrap gap-2">
-        <FeedStocktakeButton />
-      </div>
 
       {/* Totals bar: 2 per row on mobile, 4 per row from sm+ */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
