@@ -1,7 +1,6 @@
 // netlify/functions/migrateFarmData.ts
 import type { Handler } from "@netlify/functions";
 
-// Buckets that may exist before a farm was created — customize as needed.
 const DEFAULT_KEYS = [
   "morts",
   "feed",
@@ -12,17 +11,30 @@ const DEFAULT_KEYS = [
   "reminders",
 ];
 
-// Build an absolute URL to call your existing /data gateway.
+// Build absolute URL to call our own /data function
 function getBaseURL(event: any): string {
   const host = event.headers["x-forwarded-host"] || event.headers.host;
   const proto = (event.headers["x-forwarded-proto"] || "https").split(",")[0].trim();
   return `${proto}://${host}`;
 }
 
-async function fetchJSON(url: string, init?: RequestInit) {
+function authHeadersFrom(event: any) {
+  const cookie = event.headers.cookie || event.headers.Cookie;
+  const authorization = event.headers.authorization || event.headers.Authorization;
+  return {
+    ...(cookie ? { Cookie: cookie } : {}),
+    ...(authorization ? { Authorization: authorization } : {}),
+  };
+}
+
+async function fetchJSON(url: string, init: RequestInit, extraHeaders: Record<string, string>) {
   const res = await fetch(url, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...extraHeaders,
+      ...(init.headers || {}),
+    },
   });
   const text = await res.text();
   let data: any;
@@ -40,40 +52,42 @@ export const handler: Handler = async (event) => {
   }
 
   try {
-    const baseURL = getBaseURL(event);
-    const body = JSON.parse(event.body || "{}");
-    const farmId: string = String(body.farmId || "").trim();
-    const keys: string[] = Array.isArray(body.keys) && body.keys.length ? body.keys : DEFAULT_KEYS;
-    const dryRun: boolean = !!body.dryRun; // if true, only lists what would be migrated
+    const { farmId, keys, dryRun } = JSON.parse(event.body || "{}") as {
+      farmId: string;
+      keys?: string[];
+      dryRun?: boolean;
+    };
+    if (!farmId) return { statusCode: 400, body: "farmId is required" };
 
-    if (!farmId) {
-      return { statusCode: 400, body: "farmId is required" };
-    }
+    const baseURL = getBaseURL(event);
+    const passAuth = authHeadersFrom(event);
+    const list = Array.isArray(keys) && keys.length ? keys : DEFAULT_KEYS;
 
     const migrated: string[] = [];
     const missing: string[] = [];
     const errors: { key: string; error: string }[] = [];
 
-    for (const k of keys) {
+    for (const k of list) {
       const fromKey = `data/${k}`;
       const toKey   = `farm/${farmId}/${k}`;
 
       try {
-        // Read orphaned value
-        const getURL = `${baseURL}/.netlify/functions/data?key=${encodeURIComponent(fromKey)}`;
-        const got = await fetchJSON(getURL); // { value?: any }
+        // GET orphan
+        const got = await fetchJSON(
+          `${baseURL}/.netlify/functions/data?key=${encodeURIComponent(fromKey)}`,
+          { method: "GET" },
+          passAuth
+        ); // returns { value?: any }
+
         const value = got?.value;
-        if (value == null) {
-          missing.push(k);
-          continue;
-        }
+        if (value == null) { missing.push(k); continue; }
 
         if (!dryRun) {
-          const setURL = `${baseURL}/.netlify/functions/data?key=${encodeURIComponent(toKey)}`;
-          await fetchJSON(setURL, {
-            method: "POST",
-            body: JSON.stringify(value),
-          });
+          await fetchJSON(
+            `${baseURL}/.netlify/functions/data?key=${encodeURIComponent(toKey)}`,
+            { method: "POST", body: JSON.stringify(value) },
+            passAuth
+          );
         }
 
         migrated.push(k);
@@ -84,7 +98,7 @@ export const handler: Handler = async (event) => {
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ ok: true, farmId, migrated, missing, errors, dryRun }),
+      body: JSON.stringify({ ok: true, farmId, migrated, missing, errors, dryRun: !!dryRun }),
     };
   } catch (err: any) {
     return { statusCode: 500, body: `Migration failed: ${err?.message || "unknown"}` };
