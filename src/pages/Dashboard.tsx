@@ -185,7 +185,7 @@ export default function Dashboard() {
 
       {/* Quick actions */}
       <div className="flex flex-wrap gap-2">
-        <FeedStocktakeLightboxButton />
+        <FeedStocktakeButton />
       </div>
 
       {/* Totals bar: 2 per row on mobile, 4 per row from sm+ */}
