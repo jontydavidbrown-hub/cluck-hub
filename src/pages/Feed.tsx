@@ -1,5 +1,5 @@
 // src/pages/Feed.tsx
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useCloudSlice } from "../lib/cloudSlice";
 
 type FeedType = "starter" | "grower" | "finisher";
@@ -7,12 +7,14 @@ const FEED_TYPES = ["starter", "grower", "finisher"] as const;
 
 type FeedQuotas = Partial<Record<FeedType, number>>; // from Setup (loads of 24t each)
 
+// Deliveries store exact tonnes; legacy "loads" still supported (auto-converted)
 type Delivery = {
   id: string;
   date: string;          // YYYY-MM-DD
   type: FeedType;
   tonnes?: number;       // exact weight entered (preferred)
   loads?: number;        // legacy integer loads; converted to tonnes * 24
+  shedId?: string;       // NEW: optional shed association
 };
 
 type Shed = {
@@ -24,7 +26,6 @@ type Shed = {
 };
 
 // Stocktake entries (per shed, exact tonnes on hand)
-// Support legacy items which may have only `date`; new ones use `dateTime`.
 type Stocktake = {
   id: string;
   shedId: string;
@@ -57,23 +58,18 @@ function deliveryTonnes(d: Delivery): number {
 }
 
 export default function Feed() {
-  // Quotas authored in Setup; do not seed here.
+  // Quotas authored in Setup
   const [feedQuotas] = useCloudSlice<FeedQuotas | null>("feedQuotas", null);
-  // Deliveries authored here.
+  // Deliveries authored here
   const [deliveries, setDeliveries] = useCloudSlice<Delivery[]>("feedDeliveries", []);
-  // Sheds (for stocktake selector)
+  // Sheds (for stocktake & deliveries)
   const [sheds] = useCloudSlice<Shed[]>("sheds", []);
   // Stocktakes (per shed total on-hand)
   const [stocktakes, setStocktakes] = useCloudSlice<Stocktake[]>("feedStocktakes", []);
 
-  // --- Add Delivery (unchanged logic, exact tonnes) ---
-  const [draftDate, setDraftDate] = useState<string>(todayStr());
-  const [draftType, setDraftType] = useState<FeedType>("starter");
-  const [draftTonnes, setDraftTonnes] = useState<number | "">("");
-
   const q = normalizeQuotas(feedQuotas);
 
-  // Sum delivered TONNES by type
+  // ===== Remaining tiles logic =====
   const deliveredTonnesByType = useMemo(() => {
     const sums: Record<FeedType, number> = { starter: 0, grower: 0, finisher: 0 };
     for (const d of deliveries || []) {
@@ -83,14 +79,12 @@ export default function Feed() {
     return sums;
   }, [deliveries]);
 
-  // Convert to delivered LOADS by type (fractional allowed)
   const deliveredLoadsByType = useMemo(() => {
     const loads: Record<FeedType, number> = { starter: 0, grower: 0, finisher: 0 };
     for (const t of FEED_TYPES) loads[t] = deliveredTonnesByType[t] / LOAD_TONNES;
     return loads;
   }, [deliveredTonnesByType]);
 
-  // Remaining tiles
   const remaining = useMemo(() => {
     return FEED_TYPES.map((t) => {
       const quotaLoads = q[t] || 0;
@@ -102,19 +96,9 @@ export default function Feed() {
     });
   }, [q, deliveredLoadsByType]);
 
-  function addDelivery() {
-    const tonnes = draftTonnes === "" ? 0 : Math.max(0, Number(draftTonnes));
-    if (!draftDate || !draftType || !(tonnes > 0)) return;
-    const entry: Delivery = { id: uuid(), date: draftDate, type: draftType, tonnes };
-    setDeliveries([...(deliveries || []), entry]);
-    setDraftTonnes("");
-  }
-  function removeDelivery(id: string) {
-    if (!confirm("Remove this delivery?")) return;
-    setDeliveries((prev) => (prev || []).filter((d) => d.id !== id));
-  }
+  const haveAnyQuota = (q.starter ?? 0) + (q.grower ?? 0) + (q.finisher ?? 0) > 0;
 
-  // --- Single-tile Stocktake ---
+  // ===== Stocktake (single tile) =====
   const shedsSorted = useMemo(
     () => [...(sheds || [])].sort((a, b) => (a?.name || "").localeCompare(b?.name || "")),
     [sheds]
@@ -123,26 +107,24 @@ export default function Feed() {
   const [stShedId, setStShedId] = useState<string>(firstShedId);
   const [stTonnes, setStTonnes] = useState<number | "">("");
 
-  // Keep selected shed in range if sheds change
-  if (stShedId && !shedsSorted.find((s) => s.id === stShedId)) {
-    // selected shed deleted; fall back
-    if (firstShedId !== stShedId) setStShedId(firstShedId);
-  }
+  // Keep selection valid as sheds change; also set when we get first shed
+  useEffect(() => {
+    if (!stShedId && firstShedId) setStShedId(firstShedId);
+    if (stShedId && !shedsSorted.find((s) => s.id === stShedId) && firstShedId) {
+      setStShedId(firstShedId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstShedId, shedsSorted.length]);
 
   function addStocktake() {
     const tonnes = stTonnes === "" ? 0 : Math.max(0, Number(stTonnes));
     if (!stShedId || !(tonnes > 0)) return;
-    const entry: Stocktake = {
-      id: uuid(),
-      shedId: stShedId,
-      tonnes,
-      dateTime: nowIso(),
-    };
+    const entry: Stocktake = { id: uuid(), shedId: stShedId, tonnes, dateTime: nowIso() };
     setStocktakes([...(stocktakes || []), entry]);
     setStTonnes("");
   }
 
-  // Stocktake history newest first
+  // History newest first
   const stocktakeRows = useMemo(() => {
     const list = [...(stocktakes || [])];
     list.sort((a, b) => {
@@ -153,13 +135,78 @@ export default function Feed() {
     return list;
   }, [stocktakes]);
 
-  // Deliveries list newest first
+  // ===== Add Delivery (exact tonnes + Shed dropdown) =====
+  const [draftDate, setDraftDate] = useState<string>(todayStr());
+  const [draftType, setDraftType] = useState<FeedType>("starter");
+  const [draftTonnes, setDraftTonnes] = useState<number | "">("");
+  const [draftShedId, setDraftShedId] = useState<string>(firstShedId);
+
+  useEffect(() => {
+    if (!draftShedId && firstShedId) setDraftShedId(firstShedId);
+    if (draftShedId && !shedsSorted.find((s) => s.id === draftShedId) && firstShedId) {
+      setDraftShedId(firstShedId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstShedId, shedsSorted.length]);
+
+  function addDelivery() {
+    const tonnes = draftTonnes === "" ? 0 : Math.max(0, Number(draftTonnes));
+    if (!draftDate || !draftType || !(tonnes > 0)) return;
+    const entry: Delivery = { id: uuid(), date: draftDate, type: draftType, tonnes, shedId: draftShedId || undefined };
+    setDeliveries([...(deliveries || []), entry]);
+    setDraftTonnes("");
+  }
+
+  function removeDelivery(id: string) {
+    if (!confirm("Remove this delivery?")) return;
+    setDeliveries((prev) => (prev || []).filter((d) => d.id !== id));
+  }
+
+  // ===== Edit Delivery inline =====
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [edit, setEdit] = useState<Partial<Delivery> | null>(null);
+
+  function startEdit(r: Delivery) {
+    setEditingId(r.id);
+    setEdit({
+      id: r.id,
+      date: r.date,
+      type: r.type,
+      shedId: r.shedId,
+      tonnes: deliveryTonnes(r),
+    });
+  }
+  function saveEdit() {
+    if (!editingId || !edit) return;
+    const tonnes = edit.tonnes == null || edit.tonnes === "" ? 0 : Math.max(0, Number(edit.tonnes));
+    if (!(tonnes > 0)) return; // keep simple validation consistent with add
+    setDeliveries((prev) =>
+      (prev || []).map((d) =>
+        d.id === editingId
+          ? {
+              ...d,
+              date: (edit.date as string) || d.date,
+              type: (edit.type as FeedType) || d.type,
+              shedId: edit.shedId || undefined,
+              tonnes,
+              loads: undefined, // normalize to tonnes on edit
+            }
+          : d
+      )
+    );
+    setEditingId(null);
+    setEdit(null);
+  }
+  function cancelEdit() {
+    setEditingId(null);
+    setEdit(null);
+  }
+
+  // Lists (newest first for deliveries)
   const deliveryRows = useMemo(
     () => [...(deliveries || [])].sort((a, b) => (b.date || "").localeCompare(a.date || "")),
     [deliveries]
   );
-
-  const haveAnyQuota = (q.starter ?? 0) + (q.grower ?? 0) + (q.finisher ?? 0) > 0;
 
   return (
     <div className="p-4 space-y-6">
@@ -193,7 +240,7 @@ export default function Feed() {
             ))}
           </div>
 
-          {/* Single Stocktake tile */}
+          {/* Single Stocktake tile (Save + Enter support) */}
           <div className="p-4 border rounded-2xl bg-white">
             <div className="font-medium mb-3">Feed Stocktake</div>
 
@@ -202,7 +249,13 @@ export default function Feed() {
                 No sheds yet. Add sheds in <span className="font-medium">Setup</span>.
               </div>
             ) : (
-              <div className="grid md:grid-cols-6 gap-3 items-end">
+              <form
+                className="grid md:grid-cols-6 gap-3 items-end"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  addStocktake();
+                }}
+              >
                 <label className="block md:col-span-3">
                   <div className="text-sm mb-1">Shed</div>
                   <select
@@ -236,61 +289,18 @@ export default function Feed() {
                 </label>
 
                 <div className="md:col-span-1">
-                  <button className="w-full rounded bg-slate-900 text-white px-4 py-2" onClick={addStocktake}>
-                    Okay
+                  <button type="submit" className="w-full rounded bg-slate-900 text-white px-4 py-2">
+                    Save
                   </button>
                 </div>
-              </div>
+              </form>
             )}
           </div>
 
-          {/* Stocktake History */}
-          <div className="p-4 border rounded-2xl bg-white">
-            <div className="font-medium mb-3">Stocktake History</div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left border-b">
-                    <th className="py-2 pr-2">Date</th>
-                    <th className="py-2 pr-2">Time</th>
-                    <th className="py-2 pr-2">Shed</th>
-                    <th className="py-2 pr-2">Tonnes left</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stocktakeRows.map((st) => {
-                    const when = st.dateTime || (st.date ? st.date + "T00:00:00Z" : "");
-                    const d = when ? new Date(when) : null;
-                    const dateStr = d ? d.toLocaleDateString() : "-";
-                    const timeStr = d ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-";
-                    const shedName = shedsSorted.find((s) => s.id === st.shedId)?.name || `Shed ${String(st.shedId).slice(0, 4)}`;
-                    return (
-                      <tr key={st.id} className="border-b">
-                        <td className="py-2 pr-2">{dateStr}</td>
-                        <td className="py-2 pr-2">{timeStr}</td>
-                        <td className="py-2 pr-2">{shedName}</td>
-                        <td className="py-2 pr-2">
-                          {Number(st.tonnes || 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} t
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {stocktakeRows.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="py-6 text-slate-500">
-                        No stocktakes yet.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Add Delivery (exact tonnes) */}
+          {/* Add Delivery (exact tonnes + Shed dropdown) */}
           <div className="p-4 border rounded-2xl bg-white">
             <div className="font-medium mb-3">Add Delivery</div>
-            <div className="grid md:grid-cols-6 gap-3 items-end">
+            <div className="grid md:grid-cols-8 gap-3 items-end">
               <label className="block">
                 <div className="text-sm mb-1">Date</div>
                 <input
@@ -315,6 +325,29 @@ export default function Feed() {
               </label>
 
               <label className="block">
+                <div className="text-sm mb-1">Shed</div>
+                {shedsSorted.length > 0 ? (
+                  <select
+                    className="w-full border rounded px-3 py-2 bg-white"
+                    value={draftShedId || firstShedId}
+                    onChange={(e) => setDraftShedId(e.target.value)}
+                  >
+                    {shedsSorted.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name || `Shed ${String(s.id).slice(0, 4)}`}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="w-full border rounded px-3 py-2 bg-white text-slate-500"
+                    value={"No sheds — add in Setup"}
+                    readOnly
+                  />
+                )}
+              </label>
+
+              <label className="block">
                 <div className="text-sm mb-1">Tonnes delivered</div>
                 <input
                   type="number"
@@ -331,7 +364,7 @@ export default function Feed() {
                 />
               </label>
 
-              <div className="md:col-span-3">
+              <div className="md:col-span-4">
                 <button className="rounded bg-slate-900 text-white px-4 py-2" onClick={addDelivery}>
                   Add
                 </button>
@@ -342,7 +375,7 @@ export default function Feed() {
             </p>
           </div>
 
-          {/* Deliveries list */}
+          {/* Deliveries list (with Edit) */}
           <div className="p-4 border rounded-2xl bg-white">
             <div className="font-medium mb-3">Deliveries</div>
             <div className="overflow-x-auto">
@@ -351,6 +384,7 @@ export default function Feed() {
                   <tr className="text-left border-b">
                     <th className="py-2 pr-2">Date</th>
                     <th className="py-2 pr-2">Type</th>
+                    <th className="py-2 pr-2">Shed</th>
                     <th className="py-2 pr-2">Tonnes</th>
                     <th className="py-2 pr-2">Loads (≈)</th>
                     <th className="py-2 pr-2">Actions</th>
@@ -360,28 +394,176 @@ export default function Feed() {
                   {deliveryRows.map((r) => {
                     const tonnes = deliveryTonnes(r);
                     const loadsApprox = tonnes / LOAD_TONNES;
+                    const shedName =
+                      shedsSorted.find((s) => s.id === r.shedId)?.name ||
+                      (r.shedId ? `Shed ${String(r.shedId).slice(0, 4)}` : "—");
+
+                    const isEditing = editingId === r.id;
+
                     return (
                       <tr key={r.id} className="border-b">
-                        <td className="py-2 pr-2">{r.date}</td>
-                        <td className="py-2 pr-2 capitalize">{r.type}</td>
                         <td className="py-2 pr-2">
-                          {tonnes.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} t
+                          {isEditing ? (
+                            <input
+                              type="date"
+                              className="border rounded px-2 py-1"
+                              value={(edit?.date as string) ?? r.date}
+                              onChange={(e) => setEdit((p) => ({ ...(p || {}), date: e.target.value }))}
+                            />
+                          ) : (
+                            r.date
+                          )}
+                        </td>
+                        <td className="py-2 pr-2 capitalize">
+                          {isEditing ? (
+                            <select
+                              className="border rounded px-2 py-1 bg-white"
+                              value={(edit?.type as FeedType) ?? r.type}
+                              onChange={(e) => setEdit((p) => ({ ...(p || {}), type: e.target.value as FeedType }))}
+                            >
+                              <option value="starter">Starter</option>
+                              <option value="grower">Grower</option>
+                              <option value="finisher">Finisher</option>
+                            </select>
+                          ) : (
+                            r.type
+                          )}
                         </td>
                         <td className="py-2 pr-2">
-                          {loadsApprox.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                          {isEditing ? (
+                            <select
+                              className="border rounded px-2 py-1 bg-white"
+                              value={(edit?.shedId as string) ?? r.shedId ?? ""}
+                              onChange={(e) => setEdit((p) => ({ ...(p || {}), shedId: e.target.value }))}
+                            >
+                              <option value="">—</option>
+                              {shedsSorted.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.name || `Shed ${String(s.id).slice(0, 4)}`}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            shedName
+                          )}
                         </td>
                         <td className="py-2 pr-2">
-                          <button className="px-2 py-1 border rounded text-red-600" onClick={() => removeDelivery(r.id)}>
-                            Remove
-                          </button>
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              step="0.1"
+                              min={0}
+                              className="border rounded px-2 py-1"
+                              value={
+                                edit?.tonnes === "" ? "" : (edit?.tonnes as number | undefined) ?? tonnes
+                              }
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setEdit((p) => ({
+                                  ...(p || {}),
+                                  tonnes: v === "" ? "" : Math.max(0, Number(v)),
+                                }));
+                              }}
+                            />
+                          ) : (
+                            <>
+                              {tonnes.toLocaleString(undefined, {
+                                minimumFractionDigits: 1,
+                                maximumFractionDigits: 1,
+                              })}{" "}
+                              t
+                            </>
+                          )}
+                        </td>
+                        <td className="py-2 pr-2">
+                          {loadsApprox.toLocaleString(undefined, {
+                            minimumFractionDigits: 1,
+                            maximumFractionDigits: 1,
+                          })}
+                        </td>
+                        <td className="py-2 pr-2">
+                          {isEditing ? (
+                            <div className="flex gap-2">
+                              <button className="px-2 py-1 border rounded" onClick={saveEdit}>
+                                Save
+                              </button>
+                              <button className="px-2 py-1 border rounded" onClick={cancelEdit}>
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex gap-2">
+                              <button
+                                className="px-2 py-1 border rounded"
+                                onClick={() => startEdit(r)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="px-2 py-1 border rounded text-red-600"
+                                onClick={() => removeDelivery(r.id)}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
                   })}
                   {deliveryRows.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="py-6 text-slate-500">
+                      <td colSpan={6} className="py-6 text-slate-500">
                         No deliveries yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Stocktake History (moved to bottom) */}
+          <div className="p-4 border rounded-2xl bg-white">
+            <div className="font-medium mb-3">Stocktake History</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left border-b">
+                    <th className="py-2 pr-2">Date</th>
+                    <th className="py-2 pr-2">Time</th>
+                    <th className="py-2 pr-2">Shed</th>
+                    <th className="py-2 pr-2">Tonnes left</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stocktakeRows.map((st) => {
+                    const when = st.dateTime || (st.date ? st.date + "T00:00:00Z" : "");
+                    const d = when ? new Date(when) : null;
+                    const dateStr = d ? d.toLocaleDateString() : "-";
+                    const timeStr = d ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-";
+                    const shedName =
+                      shedsSorted.find((s) => s.id === st.shedId)?.name ||
+                      `Shed ${String(st.shedId).slice(0, 4)}`;
+                    return (
+                      <tr key={st.id} className="border-b">
+                        <td className="py-2 pr-2">{dateStr}</td>
+                        <td className="py-2 pr-2">{timeStr}</td>
+                        <td className="py-2 pr-2">{shedName}</td>
+                        <td className="py-2 pr-2">
+                          {Number(st.tonnes || 0).toLocaleString(undefined, {
+                            minimumFractionDigits: 1,
+                            maximumFractionDigits: 1,
+                          })}{" "}
+                          t
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {stocktakeRows.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-6 text-slate-500">
+                        No stocktakes yet.
                       </td>
                     </tr>
                   )}
