@@ -11,7 +11,6 @@ type Member = {
   role: MemberRole;
   status?: "active" | "invited";
 };
-
 type Invite = {
   farmId: string;
   farmName?: string;
@@ -28,11 +27,10 @@ const roleOptions: { value: MemberRole; label: string; desc: string }[] = [
   { value: "viewer",  label: "Viewer",  desc: "Read-only access to dashboards and records." },
 ];
 
-// Fallback storage key in /data if /members function is not available
+// data() helpers
 const membersBlobKey = (farmId: string) => `farm/${farmId}/members`;
-const invitesKey = (email: string) => `invites/${email}`;
+const invitesKey = (email: string) => `invites/${email.toLowerCase()}`;
 
-// ---------- Helpers ----------
 async function fetchJson<T = any>(
   input: RequestInfo,
   init?: RequestInit
@@ -48,13 +46,11 @@ async function fetchJson<T = any>(
     return { ok: false, status: 0, errorText: e?.message || "Network error" };
   }
 }
-
 async function dataGet<T = any>(key: string) {
   const r = await fetchJson<{ value?: T }>(`/.netlify/functions/data?key=${encodeURIComponent(key)}`);
   if (!r.ok) return undefined;
   return r.data?.value as T | undefined;
 }
-
 async function dataSet(key: string, value: any) {
   return fetchJson(`/.netlify/functions/data?key=${encodeURIComponent(key)}`, {
     method: "POST",
@@ -64,18 +60,33 @@ async function dataSet(key: string, value: any) {
   });
 }
 
+// Try multiple likely endpoints for current user
 async function getCurrentUserEmail(): Promise<string | null> {
-  // Try the user function that exists in your repo
-  const u = await fetchJson<{ email?: string }>(`/.netlify/functions/user`);
-  if (u.ok && u.data?.email) return u.data.email;
-  // Fallback (if your auth exposes a different endpoint, add it here)
+  const candidates = [
+    "/.netlify/functions/me",
+    "/.netlify/functions/user",
+    "/.netlify/functions/session",
+    "/api/me",
+  ];
+  for (const url of candidates) {
+    try {
+      const r = await fetch(url, { credentials: "include" });
+      if (!r.ok) continue;
+      const j = await r.json().catch(() => ({}));
+      const email =
+        j?.email ||
+        j?.user?.email ||
+        j?.account?.email ||
+        j?.data?.email ||
+        j?.profile?.email;
+      if (email && /\S+@\S+\.\S+/.test(String(email))) return String(email).toLowerCase();
+    } catch {}
+  }
   return null;
 }
 
-// ---------- Component ----------
 export default function Farms() {
   const { farms = [], farmId, setFarmId, createFarm, deleteFarm } = useFarm() as any;
-
   const farmsSorted = useMemo(
     () => [...(farms || [])].sort((a: Farm, b: Farm) => (a?.name || "").localeCompare(b?.name || "")),
     [farms]
@@ -91,9 +102,7 @@ export default function Farms() {
     try {
       await createFarm?.(name);
       setNewName("");
-    } finally {
-      setBusyFarm(false);
-    }
+    } finally { setBusyFarm(false); }
   }
   async function onDeleteFarm(id: string) {
     if (!confirm("Are you sure you want to delete this farm? This cannot be undone.")) return;
@@ -104,21 +113,18 @@ export default function Farms() {
   const [members, setMembers] = useState<Member[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [membersError, setMembersError] = useState<string | null>(null);
-
-  // Invite form state (for inviting others)
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("viewer");
   const [inviting, setInviting] = useState(false);
   const emailOk = /\S+@\S+\.\S+/.test(inviteEmail);
 
-  // Cloud slice only used to force a refresh when others change farms elsewhere
   const [dummy] = useCloudSlice("farms_dummy_sync", 0);
 
   async function loadMembers() {
     if (!farmId) { setMembers([]); return; }
     setLoadingMembers(true);
     setMembersError(null);
-    // Try primary serverless function
+    // Try primary members function
     const url = `/.netlify/functions/members?farmId=${encodeURIComponent(farmId)}`;
     const res = await fetchJson<{ members: Member[] }>(url);
     if (res.ok && Array.isArray(res.data?.members)) {
@@ -126,7 +132,7 @@ export default function Farms() {
       setLoadingMembers(false);
       return;
     }
-    // Fallback to /data key
+    // Fallback: /data
     const fb = await fetchJson<{ value?: Member[] }>(`/.netlify/functions/data?key=${encodeURIComponent(membersBlobKey(farmId))}`);
     if (fb.ok && Array.isArray(fb.data?.value)) {
       setMembers(fb.data!.value!);
@@ -137,10 +143,7 @@ export default function Farms() {
     setLoadingMembers(false);
   }
 
-  useEffect(() => {
-    loadMembers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [farmId, dummy]);
+  useEffect(() => { loadMembers(); /* eslint-disable-next-line */ }, [farmId, dummy]);
 
   async function saveMembersFallback(next: Member[]) {
     if (!farmId) return;
@@ -153,7 +156,7 @@ export default function Farms() {
     setInviting(true);
     setMembersError(null);
 
-    // Try serverless function (if present in your project)
+    // Try members function (if present)
     const res = await fetchJson<{ members: Member[] }>(`/.netlify/functions/members`, {
       method: "POST",
       credentials: "include",
@@ -168,7 +171,7 @@ export default function Farms() {
       return;
     }
 
-    // Fallback: write to /data invites/<email>
+    // Fallback: write to invites/<email>
     try {
       const email = inviteEmail.trim().toLowerCase();
       const existing: Invite[] = (await dataGet<Invite[]>(invitesKey(email))) || [];
@@ -183,9 +186,7 @@ export default function Farms() {
       alert(`Invite sent to ${email}`);
     } catch (e: any) {
       setMembersError(res.errorText || e?.message || "Invite failed");
-    } finally {
-      setInviting(false);
-    }
+    } finally { setInviting(false); }
   }
 
   async function changeRole(memberId: string, role: MemberRole) {
@@ -197,7 +198,6 @@ export default function Farms() {
       body: JSON.stringify({ action: "updateRole", farmId, memberId, role }),
     });
     if (res.ok) { setMembers(res.data?.members || []); return; }
-    // Fallback
     const next = members.map(m => m.id === memberId ? { ...m, role } : m);
     await saveMembersFallback(next);
     setMembers(next);
@@ -213,63 +213,60 @@ export default function Farms() {
       body: JSON.stringify({ action: "remove", farmId, memberId }),
     });
     if (res.ok) { setMembers(res.data?.members || []); return; }
-    // Fallback
     const next = members.filter(m => m.id !== memberId);
     await saveMembersFallback(next);
     setMembers(next);
   }
 
-  // -------- Invites (for the current user) --------
-  const [myEmail, setMyEmail] = useState<string | null>(null);
+  // -------- Invites (view/accept as invitee) --------
+  const [myEmail, setMyEmail] = useState<string>("");
   const [myInvites, setMyInvites] = useState<Invite[]>([]);
   const [loadingInvites, setLoadingInvites] = useState(false);
   const [invitesError, setInvitesError] = useState<string | null>(null);
 
-  async function loadMyInvites() {
+  async function loadMyInvites(emailOverride?: string) {
     setLoadingInvites(true);
     setInvitesError(null);
     try {
-      const email = myEmail ?? (await getCurrentUserEmail());
-      if (!email) { setLoadingInvites(false); return; }
-      const invites = (await dataGet<Invite[]>(invitesKey(email.toLowerCase()))) || [];
-      // Enrich names from farms list if missing
-      const withNames = invites.map(i => i.farmName ? i : { ...i, farmName: farms.find(f => f.id === i.farmId)?.name });
+      const email =
+        (emailOverride?.toLowerCase() || myEmail) ||
+        (await getCurrentUserEmail()) ||
+        "";
       setMyEmail(email);
+      if (!email) { setMyInvites([]); setLoadingInvites(false); return; }
+      const invites = (await dataGet<Invite[]>(invitesKey(email))) || [];
+      const withNames = invites.map(i => i.farmName ? i : { ...i, farmName: farms.find(f => f.id === i.farmId)?.name });
       setMyInvites(withNames);
     } catch (e: any) {
       setInvitesError(e?.message || "Failed to load invites");
-    } finally {
-      setLoadingInvites(false);
-    }
+    } finally { setLoadingInvites(false); }
   }
 
-  useEffect(() => {
-    loadMyInvites();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [farms.length]); // reload if farm list changes (names)
+  useEffect(() => { loadMyInvites(); /* eslint-disable-next-line */ }, [farms.length]);
 
   async function acceptInvite(inv: Invite) {
-    if (!myEmail) return alert("Please sign in again.");
+    const email = myEmail?.toLowerCase();
+    if (!email) return alert("Please enter your email (or sign in).");
     try {
-      // Add user to farm members (fallback path)
+      // Add user to farm members
       const current: Member[] = (await dataGet<Member[]>(membersBlobKey(inv.farmId))) || [];
-      const exists = current.some(m => m.email?.toLowerCase() === myEmail.toLowerCase());
+      const exists = current.some(m => (m.email || "").toLowerCase() === email);
       if (!exists) {
         const member: Member = {
           id: (globalThis as any).crypto?.randomUUID?.() ?? String(Math.random()).slice(2),
-          email: myEmail,
+          email,
           role: inv.role || "viewer",
           status: "active",
         };
         await dataSet(membersBlobKey(inv.farmId), [...current, member]);
       }
 
-      // Remove invite from invites/<email>
+      // Remove invite
       const rest = myInvites.filter(i => i.farmId !== inv.farmId);
-      await dataSet(invitesKey(myEmail.toLowerCase()), rest);
+      await dataSet(invitesKey(email), rest);
       setMyInvites(rest);
 
-      // Switch to that farm so user sees it immediately
+      // Switch to that farm so they see it
       setFarmId?.(inv.farmId);
       alert(`Joined ${inv.farmName || "farm"} as ${inv.role || "viewer"}`);
     } catch (e: any) {
@@ -278,10 +275,11 @@ export default function Farms() {
   }
 
   async function declineInvite(inv: Invite) {
-    if (!myEmail) return;
+    const email = myEmail?.toLowerCase();
+    if (!email) return;
     try {
       const rest = myInvites.filter(i => i.farmId !== inv.farmId);
-      await dataSet(invitesKey(myEmail.toLowerCase()), rest);
+      await dataSet(invitesKey(email), rest);
       setMyInvites(rest);
     } catch (e: any) {
       alert(`Decline failed: ${e?.message || "unknown error"}`);
@@ -312,22 +310,39 @@ export default function Farms() {
 
       {/* ===== Invites for current user ===== */}
       <div className="p-4 rounded-xl border bg-white space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="text-lg font-semibold">Your Invites</div>
-          <button
-            type="button"
-            className="text-sm px-3 py-1 border rounded"
-            onClick={loadMyInvites}
-          >
-            Refresh
-          </button>
+          <div className="flex gap-2">
+            <input
+              className="border rounded px-2 py-1 text-sm"
+              placeholder="your@email.com"
+              value={myEmail}
+              onChange={(e) => setMyEmail(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") loadMyInvites(myEmail); }}
+              style={{ minWidth: 220 }}
+            />
+            <button
+              type="button"
+              className="text-sm px-3 py-1 border rounded"
+              onClick={() => loadMyInvites(myEmail)}
+            >
+              Load
+            </button>
+            <button
+              type="button"
+              className="text-sm px-3 py-1 border rounded"
+              onClick={() => loadMyInvites()}
+            >
+              Auto‑detect
+            </button>
+          </div>
         </div>
 
         {loadingInvites && <div className="text-sm text-slate-500">Loading invites…</div>}
         {invitesError && <div className="text-sm text-red-600">{invitesError}</div>}
 
         {!loadingInvites && myInvites.length === 0 && (
-          <div className="text-sm text-slate-500">No invites.</div>
+          <div className="text-sm text-slate-500">No invites for {myEmail || "this account"}.</div>
         )}
 
         {!loadingInvites && myInvites.length > 0 && (
@@ -411,7 +426,7 @@ export default function Farms() {
       <div className="p-4 rounded-xl border bg-white space-y-4">
         <div className="text-lg font-semibold text-center">Members</div>
 
-        {/* Invite row */}
+        {/* Invite row (as owner/admin) */}
         <div className="grid md:grid-cols-3 gap-3 items-end">
           <label className="block">
             <div className="text-sm mb-1">Email</div>
@@ -465,9 +480,7 @@ export default function Farms() {
               </tr>
             </thead>
             <tbody>
-              {loadingMembers && (
-                <tr><td colSpan={4} className="py-4 text-slate-500">Loading members…</td></tr>
-              )}
+              {loadingMembers && (<tr><td colSpan={4} className="py-4 text-slate-500">Loading members…</td></tr>)}
               {!loadingMembers && members.map((m) => (
                 <tr key={m.id} className="border-b">
                   <td className="py-2 pr-2">{m.email}</td>
