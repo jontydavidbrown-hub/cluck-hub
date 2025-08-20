@@ -6,10 +6,10 @@ interface Farm {
   name: string;
 }
 
-const STORE_NAME = "app-data";      // any simple string
-const FARMS_KEY  = "farms_list";
+const FARMS_KEY = "farms_list"; // stored through your /data function
 
-// Adjust to your actual datasets that might exist pre-farm
+// Data categories that might exist before any farm was created.
+// Adjust to match your app
 const ORPHAN_KEYS = [
   "morts",
   "feed",
@@ -26,20 +26,41 @@ const headers = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-// Dynamic import to avoid ESM/CJS issues
-async function getStoreApi() {
-  const mod = await import("@netlify/blobs");
-  const siteID = process.env.NETLIFY_SITE_ID;
-  const token  = process.env.NETLIFY_AUTH_TOKEN;
+// Build an absolute base URL for calling our own Netlify function
+function getBaseURL(event: any): string {
+  // Prefer the official site URL if available, else use the incoming host header
+  const host = event.headers["x-forwarded-host"] || event.headers.host;
+  const proto = (event.headers["x-forwarded-proto"] || "https").split(",")[0].trim();
+  return `${proto}://${host}`;
+}
 
-  if (!siteID || !token) {
-    throw new Error(
-      "Blobs not configured. Please set NETLIFY_SITE_ID and NETLIFY_AUTH_TOKEN as environment variables."
-    );
+async function fetchJSON(url: string, init?: RequestInit) {
+  const res = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers || {}) } });
+  const text = await res.text();
+  let data: any = undefined;
+  try { data = text ? JSON.parse(text) : undefined; } catch {}
+  if (!res.ok) {
+    const msg = (data && (data.error || data.message)) || text || res.statusText || "Request failed";
+    throw new Error(msg);
   }
+  return data;
+}
 
-  // getStore(name, options)
-  return mod.getStore(STORE_NAME, { siteID, token });
+async function loadFarms(baseURL: string): Promise<Farm[]> {
+  // GET /data?key=FARMS_KEY => { value?: any }
+  const url = `${baseURL}/.netlify/functions/data?key=${encodeURIComponent(FARMS_KEY)}`;
+  const payload = await fetchJSON(url); // { value?: any }
+  const list = payload?.value;
+  return Array.isArray(list) ? list as Farm[] : [];
+}
+
+async function saveFarms(baseURL: string, farms: Farm[]): Promise<void> {
+  // POST /data?key=FARMS_KEY with JSON body = farms array
+  const url = `${baseURL}/.netlify/functions/data?key=${encodeURIComponent(FARMS_KEY)}`;
+  await fetchJSON(url, {
+    method: "POST",
+    body: JSON.stringify(farms),
+  });
 }
 
 function makeId() {
@@ -47,28 +68,26 @@ function makeId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-async function loadFarms(): Promise<Farm[]> {
-  const store = await getStoreApi();
-  const list = (await store.get(FARMS_KEY, { type: "json" })) as Farm[] | null;
-  return Array.isArray(list) ? list : [];
-}
-
-async function saveFarms(farms: Farm[]) {
-  const store = await getStoreApi();
-  await store.setJSON(FARMS_KEY, farms);
-}
-
-async function migrateOrphansToFarm(farmId: string) {
-  const store = await getStoreApi();
+// Copy orphaned keys: data/<key>  -> farm/<farmId>/<key>
+async function migrateOrphansToFarm(baseURL: string, farmId: string): Promise<void> {
   for (const key of ORPHAN_KEYS) {
     const fromKey = `data/${key}`;
+    const toKey   = `farm/${farmId}/${key}`;
+
+    // GET old
+    const getURL = `${baseURL}/.netlify/functions/data?key=${encodeURIComponent(fromKey)}`;
     try {
-      const value = await store.get(fromKey, { type: "json" });
-      if (value == null) continue;
-      const toKey = `farm/${farmId}/${key}`;
-      await store.setJSON(toKey, value);
+      const got = await fetchJSON(getURL); // { value?: any }
+      if (got?.value == null) continue;
+
+      // POST new
+      const setURL = `${baseURL}/.netlify/functions/data?key=${encodeURIComponent(toKey)}`;
+      await fetchJSON(setURL, {
+        method: "POST",
+        body: JSON.stringify(got.value),
+      });
     } catch {
-      // Skip individual failures; don't block farm creation
+      // skip individual failures; never block farm creation
     }
   }
 }
@@ -79,7 +98,10 @@ export const handler: Handler = async (event) => {
   }
 
   try {
-    let farms = await loadFarms();
+    const baseURL = getBaseURL(event);
+
+    // Always fetch current farms through the /data function
+    let farms = await loadFarms(baseURL);
 
     if (event.httpMethod === "GET") {
       return { statusCode: 200, headers, body: JSON.stringify(farms) };
@@ -96,10 +118,11 @@ export const handler: Handler = async (event) => {
       const newFarm: Farm = { id: makeId(), name };
 
       farms.push(newFarm);
-      await saveFarms(farms);
+      await saveFarms(baseURL, farms);
 
+      // If this is the FIRST farm ever, migrate orphaned data into it
       if (hadNoFarms) {
-        try { await migrateOrphansToFarm(newFarm.id); } catch {}
+        try { await migrateOrphansToFarm(baseURL, newFarm.id); } catch {}
       }
 
       return { statusCode: 200, headers, body: JSON.stringify(newFarm) };
@@ -113,7 +136,7 @@ export const handler: Handler = async (event) => {
       }
 
       farms = farms.filter((f) => f.id !== id);
-      await saveFarms(farms);
+      await saveFarms(baseURL, farms);
       return { statusCode: 200, headers, body: JSON.stringify({ ok: true }) };
     }
 
