@@ -93,42 +93,83 @@ function LoginLightboxInline() {
   );
 }
 
+// Hardened selector: filters null/invalid farms and ensures a valid value is always selected
 function HeaderFarmSelector() {
   const { farms = [], farmId, setFarmId } = useFarm() as any;
-  if (!Array.isArray(farms) || farms.length === 0) return null;
+
+  const list = Array.isArray(farms)
+    ? farms.filter((f: any) => f && typeof f === "object" && typeof f.id === "string")
+    : [];
+
+  if (list.length === 0) return null;
+
+  const current = list.find((f: any) => f.id === farmId)?.id ?? list[0].id;
+
   return (
     <div className="flex items-center gap-2">
-      <select className="border rounded-lg px-2 py-1 bg-white/80 backdrop-blur-sm shadow-sm"
-        value={farmId ?? (farms[0]?.id ?? "")} onChange={(e) => setFarmId(e.target.value)}>
-        {farms.map((f: any) => <option key={f.id} value={f.id}>{f.name || "Farm " + String(f.id).slice(0, 4)}</option>)}
+      <select
+        className="border rounded-lg px-2 py-1 bg-white/80 backdrop-blur-sm shadow-sm"
+        value={current}
+        onChange={(e) => setFarmId?.(e.target.value)}
+      >
+        {list.map((f: any) => (
+          <option key={f.id} value={f.id}>
+            {f.name || "Farm " + String(f.id).slice(0, 4)}
+          </option>
+        ))}
       </select>
     </div>
   );
 }
-function Brand() { return (
-  <div className="flex items-center gap-2">
-    <div className="size-8 rounded-xl bg-gradient-to-br from-emerald-400 to-lime-500 shadow-inner" />
-    <span className="font-semibold tracking-tight text-slate-900">Cluck Hub</span>
-  </div>
-);}
+
+function Brand() {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="size-8 rounded-xl bg-gradient-to-br from-emerald-400 to-lime-500 shadow-inner" />
+      <span className="font-semibold tracking-tight text-slate-900">Cluck Hub</span>
+    </div>
+  );
+}
+
 function NavItem({ to, children }: { to: string; children: any }) {
   return (
-    <NavLink to={to} className={({ isActive }) =>
-      ["relative px-3 py-2 rounded-xl transition-colors","hover:bg-slate-900/5",isActive ? "text-slate-900" : "text-slate-600"].join(" ")}>
+    <NavLink
+      to={to}
+      className={({ isActive }) =>
+        [
+          "relative px-3 py-2 rounded-xl transition-colors",
+          "hover:bg-slate-900/5",
+          isActive ? "text-slate-900" : "text-slate-600",
+        ].join(" ")
+      }
+    >
       {({ isActive }) => (
         <span className="inline-flex items-center gap-2">
           <span>{children}</span>
-          <span className={["absolute left-1/2 -translate-x-1/2 -bottom-1 h-0.5 w-6 rounded-full transition-all",
-            isActive ? "bg-emerald-500 scale-100 opacity-100" : "scale-0 opacity-0"].join(" ")} />
+          <span
+            className={[
+              "absolute left-1/2 -translate-x-1/2 -bottom-1 h-0.5 w-6 rounded-full transition-all",
+              isActive ? "bg-emerald-500 scale-100 opacity-100" : "scale-0 opacity-0",
+            ].join(" ")}
+          />
         </span>
       )}
     </NavLink>
   );
 }
-/** Mobile drawer (unchanged other than items) */
+
+/** Mobile drawer (unchanged visuals, updated links) */
 function MobileDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   useEffect(() => {
-    try { if (open) { const prev = document.body.style.overflow; document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = prev; }; } } catch {}
+    try {
+      if (open) {
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        return () => {
+          document.body.style.overflow = prev;
+        };
+      }
+    } catch {}
   }, [open]);
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
@@ -148,21 +189,46 @@ function MobileDrawer({ open, onClose }: { open: boolean; onClose: () => void })
     { to: "/Farms", label: "Farms" },
     { to: "/user", label: "User" },
   ];
+
   return (
     <>
-      <div className={["fixed inset-0 z-[8000] bg-black/30 backdrop-blur-sm transition-opacity md:hidden",
-        open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"].join(" ")} onClick={onClose} aria-hidden />
-      <aside className={["fixed top-0 left-0 z-[8050] h-full w-72 bg-white shadow-xl md:hidden transition-transform",
-        open ? "translate-x-0" : "-translate-x-full"].join(" ")} role="dialog" aria-label="Mobile navigation">
+      <div
+        className={[
+          "fixed inset-0 z-[8000] bg-black/30 backdrop-blur-sm transition-opacity md:hidden",
+          open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
+        ].join(" ")}
+        onClick={onClose}
+        aria-hidden
+      />
+      <aside
+        className={[
+          "fixed top-0 left-0 z-[8050] h-full w-72 bg-white shadow-xl md:hidden transition-transform",
+          open ? "translate-x-0" : "-translate-x-full",
+        ].join(" ")}
+        role="dialog"
+        aria-label="Mobile navigation"
+      >
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200">
-          <div className="flex items-center gap-2"><div className="size-7 rounded-lg bg-gradient-to-br from-emerald-400 to-lime-500" /><span className="font-semibold">Cluck Hub</span></div>
-          <button className="rounded-lg p-2 hover:bg-slate-100" aria-label="Close menu" onClick={onClose}>✕</button>
+          <div className="flex items-center gap-2">
+            <div className="size-7 rounded-lg bg-gradient-to-br from-emerald-400 to-lime-500" />
+            <span className="font-semibold">Cluck Hub</span>
+          </div>
+          <button className="rounded-lg p-2 hover:bg-slate-100" aria-label="Close menu" onClick={onClose}>
+            ✕
+          </button>
         </div>
         <nav className="p-2">
           {links.map((l) => (
-            <NavLink key={l.to} to={l.to}
-              className={({ isActive }) => ["block px-3 py-2 rounded-lg","hover:bg-slate-100 transition",isActive ? "bg-slate-100 font-medium" : "text-slate-700"].join(" ")}
-              onClick={onClose}>{l.label}</NavLink>
+            <NavLink
+              key={l.to}
+              to={l.to}
+              className={({ isActive }) =>
+                ["block px-3 py-2 rounded-lg", "hover:bg-slate-100 transition", isActive ? "bg-slate-100 font-medium" : "text-slate-700"].join(" ")
+              }
+              onClick={onClose}
+            >
+              {l.label}
+            </NavLink>
           ))}
         </nav>
       </aside>
@@ -174,8 +240,10 @@ export default function App() {
   const location = useLocation();
   const routeKey = useMemo(() => location.pathname, [location.pathname]);
   const [mobileOpen, setMobileOpen] = useState(false);
+
   return (
     <div className="min-h-dvh bg-gradient-to-b from-slate-50 to-white relative">
+      {/* animated soft blobs background */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
         <div className="absolute -top-20 -left-32 w-96 h-96 rounded-full bg-emerald-200/40 blur-3xl animate-blob" />
         <div className="absolute top-1/3 -right-24 w-96 h-96 rounded-full bg-lime-200/40 blur-3xl animate-blob animation-delay-2000" />
@@ -193,6 +261,7 @@ export default function App() {
               </button>
               <Brand />
             </div>
+
             <nav className="hidden md:flex items-center gap-1 text-sm">
               <NavItem to="/">Dashboard</NavItem>
               <NavItem to="/morts">Morts</NavItem>
@@ -205,6 +274,7 @@ export default function App() {
               <NavItem to="/Farms">Farms</NavItem>
               <NavItem to="/user">User</NavItem>
             </nav>
+
             <HeaderFarmSelector />
           </div>
         </div>
@@ -212,7 +282,9 @@ export default function App() {
 
       <main className="relative">
         <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-          <div key={routeKey} className="animate-fade-slide"><Outlet /></div>
+          <div key={routeKey} className="animate-fade-slide">
+            <Outlet />
+          </div>
         </div>
       </main>
 
