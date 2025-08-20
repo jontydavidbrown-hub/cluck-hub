@@ -6,6 +6,8 @@ import App from "./App";
 import "./index.css";
 import Pickups from "./pages/Pickups";
 
+{ path: "/pickups", element: <Pickups /> },
+
 import Dashboard from "./pages/Dashboard";
 import Morts from "./pages/Morts";
 import Weights from "./pages/Weights";
