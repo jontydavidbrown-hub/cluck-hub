@@ -1,3 +1,4 @@
+// src/App.tsx
 import { Outlet, NavLink, useLocation } from "react-router-dom";
 import { useMemo, useEffect, useRef, useState } from "react";
 import { useFarm } from "./lib/FarmContext";
@@ -93,15 +94,14 @@ function LoginLightboxInline() {
 }
 
 function HeaderFarmSelector() {
-  const { farms = [], farmId, setFarmId, createFarm } = useFarm() as any;
+  const { farms = [], farmId, setFarmId } = useFarm() as any;
   if (!Array.isArray(farms) || farms.length === 0) return null;
   return (
     <div className="flex items-center gap-2">
       <select className="border rounded-lg px-2 py-1 bg-white/80 backdrop-blur-sm shadow-sm"
         value={farmId ?? (farms[0]?.id ?? "")} onChange={(e) => setFarmId(e.target.value)}>
-        {farms.map((f: any) => <option key={f.id} value={f.id}>{f.name || "Farm " + f.id.slice(0, 4)}</option>)}
+        {farms.map((f: any) => <option key={f.id} value={f.id}>{f.name || "Farm " + String(f.id).slice(0, 4)}</option>)}
       </select>
-      
     </div>
   );
 }
@@ -125,7 +125,7 @@ function NavItem({ to, children }: { to: string; children: any }) {
     </NavLink>
   );
 }
-/** Mobile drawer (unchanged) */
+/** Mobile drawer (unchanged other than items) */
 function MobileDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   useEffect(() => {
     try { if (open) { const prev = document.body.style.overflow; document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = prev; }; } } catch {}
@@ -137,9 +137,16 @@ function MobileDrawer({ open, onClose }: { open: boolean; onClose: () => void })
   }, [open, onClose]);
 
   const links = [
-    { to: "/", label: "Dashboard" }, { to: "/morts", label: "Morts" }, { to: "/weights", label: "Weights" },
-    { to: "/feed", label: "Feed" }, { to: "/water", label: "Water" }, { to: "/reminders", label: "Reminders" },
-    { to: "/setup", label: "Setup" }, { to: "/Farms", label: "Farms" }, { to: "/user", label: "User" },
+    { to: "/", label: "Dashboard" },
+    { to: "/morts", label: "Morts" },
+    { to: "/pickups", label: "Pickups" },
+    { to: "/weights", label: "Weights" },
+    { to: "/feed", label: "Feed" },
+    { to: "/water", label: "Water" },
+    { to: "/reminders", label: "Reminders" },
+    { to: "/setup", label: "Setup" },
+    { to: "/Farms", label: "Farms" },
+    { to: "/user", label: "User" },
   ];
   return (
     <>
@@ -187,9 +194,16 @@ export default function App() {
               <Brand />
             </div>
             <nav className="hidden md:flex items-center gap-1 text-sm">
-              <NavItem to="/">Dashboard</NavItem><NavItem to="/morts">Morts</NavItem><NavItem to="/weights">Weights</NavItem>
-              <NavItem to="/feed">Feed</NavItem><NavItem to="/water">Water</NavItem><NavItem to="/reminders">Reminders</NavItem>
-              <NavItem to="/setup">Setup</NavItem><NavItem to="/Farms">Farms</NavItem><NavItem to="/user">User</NavItem>
+              <NavItem to="/">Dashboard</NavItem>
+              <NavItem to="/morts">Morts</NavItem>
+              <NavItem to="/pickups">Pickups</NavItem>
+              <NavItem to="/weights">Weights</NavItem>
+              <NavItem to="/feed">Feed</NavItem>
+              <NavItem to="/water">Water</NavItem>
+              <NavItem to="/reminders">Reminders</NavItem>
+              <NavItem to="/setup">Setup</NavItem>
+              <NavItem to="/Farms">Farms</NavItem>
+              <NavItem to="/user">User</NavItem>
             </nav>
             <HeaderFarmSelector />
           </div>
