@@ -379,8 +379,8 @@ export default function Dashboard() {
                   <div className="text-sm font-medium">{v.age}</div>
                 </div>
                 <div className="rounded border p-2">
-                  <div className="text-[11px] text-slate-500">Birds Placed</div>
-                  <div className="text-sm font-medium">{v.birdsPlaced.toLocaleString()}</div>
+                  <div className="text-[11px] text-slate-500">Birds Remaining</div>
+                  <div className="text-sm font-medium">{v.remaining.toLocaleString()}</div>
                 </div>
                 <div className="rounded border p-2">
                   <div className="text-[11px] text-slate-500">Morts / Culls</div>
