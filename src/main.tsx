@@ -6,10 +6,10 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import App from "./App";
 import Dashboard from "./pages/Dashboard";
 import Morts from "./pages/Morts";
-import Pickups from "./pages/Pickups";
 import Weights from "./pages/Weights";
 import Feed from "./pages/Feed";
 import Water from "./pages/Water";
+import Pickups from "./pages/Pickups";
 import Reminders from "./pages/Reminders";
 import Setup from "./pages/Setup";
 import Farms from "./pages/Farms";
@@ -25,10 +25,10 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Dashboard /> },
       { path: "morts", element: <Morts /> },
-      { path: "pickups", element: <Pickups /> },
       { path: "weights", element: <Weights /> },
       { path: "feed", element: <Feed /> },
       { path: "water", element: <Water /> },
+      { path: "pickups", element: <Pickups /> },
       { path: "reminders", element: <Reminders /> },
       { path: "setup", element: <Setup /> },
       // Keep the capital F to match your existing link
