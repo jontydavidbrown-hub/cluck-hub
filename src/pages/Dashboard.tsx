@@ -27,9 +27,6 @@ type DailyLogRow = {
   cullOther?: number;
   culls?: number;              // aggregated culls (compat)
 
-  // Compat: total mortalities (morts + culls) if the row already saved the sum
-  mortalities?: number;
-};
 
 type Settings = {
   batchLengthDays?: number;
@@ -73,11 +70,9 @@ export default function Dashboard() {
     // - mortalitiesByShed: total mortalities (morts + culls) per shed
     // - mortsOnlyByShed: morts-only per shed
     // - cullsByShed: culls-only per shed
-    const mortalitiesByShed = new Map<string, number>();
     const mortsOnlyByShed = new Map<string, number>();
     const cullsByShed = new Map<string, number>();
 
-    let totalMortalitiesAll = 0;
     let totalMortsOnlyAll = 0;
     let totalCullsOnlyAll = 0;
 
@@ -95,12 +90,10 @@ export default function Dashboard() {
           : mOnly + cOnly;
 
       // Accumulate per-shed
-      mortalitiesByShed.set(key, (mortalitiesByShed.get(key) || 0) + mortalitiesTotal);
       mortsOnlyByShed.set(key, (mortsOnlyByShed.get(key) || 0) + mOnly);
       cullsByShed.set(key, (cullsByShed.get(key) || 0) + cOnly);
 
       // Accumulate totals
-      totalMortalitiesAll += mortalitiesTotal;
       totalMortsOnlyAll += mOnly;
       totalCullsOnlyAll += cOnly;
     }
@@ -116,7 +109,6 @@ export default function Dashboard() {
         const placed = Number(s.birdsPlaced ?? s.placementBirds) || 0;
         totalPlacedBirdsAll += placed;
 
-        const mortsTotal = mortalitiesByShed.get(shedName) || 0;
         const mOnly = mortsOnlyByShed.get(shedName) || 0;
         const cOnly = cullsByShed.get(shedName) || 0;
 
@@ -148,7 +140,6 @@ export default function Dashboard() {
           birdsPlaced: placed || undefined,
           progressPct,
           ageDays: s.placementDate ? ageDays : undefined,
-          mortsTotal,
           mortsOnly: mOnly,
           cullsOnly: cOnly,
           feedKgToday, // kg/day
@@ -159,7 +150,6 @@ export default function Dashboard() {
     const totals = {
       totalPlacedBirdsAll,
       totalRemainingBirdsAll,
-      totalMortsAll: totalMortalitiesAll,
       totalMortsOnlyAll,
       totalCullsOnlyAll,
       totalFeedKgTodayAll, // kg/day
@@ -199,7 +189,6 @@ export default function Dashboard() {
         <div className="rounded border p-4 bg-white">
           <div className="text-xs text-slate-500">Total Morts</div>
           <div className="text-2xl font-semibold">
-            {totals.totalMortsAll.toLocaleString()}
           </div>
           <div className="mt-1 text-xs text-slate-500">Morts / Culls</div>
           <div className="text-lg font-semibold">
@@ -261,8 +250,6 @@ export default function Dashboard() {
                 </div>
 
                 <div className="rounded border p-2">
-                  <div className="text-xs text-slate-500">Morts (total)</div>
-                  <div className="text-lg font-semibold">{t.mortsTotal}</div>
                   <div className="text-xs text-slate-500 mt-1">Morts / Culls</div>
                   <div className="text-lg font-semibold">
                     {t.mortsOnly}/{t.cullsOnly}
