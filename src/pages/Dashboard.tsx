@@ -16,8 +16,8 @@ type Shed = {
 type MortsRow = {
   id: string;
   date: string;          // YYYY-MM-DD
-  shed?: string;         // may be shed name
-  shedId?: string;       // optional if newer pages saved id
+  shed?: string;         // may be shed name (legacy)
+  shedId?: string;       // preferred
   mortalities?: number;  // legacy "morts"
   morts?: number;        // current "morts"
   culls?: number;        // legacy combined culls
@@ -33,7 +33,7 @@ type Delivery = {
   id: string;
   date: string;     // YYYY-MM-DD
   type: FeedType;
-  tonnes?: number;
+  tonnes?: number;  // preferred
   loads?: number;   // legacy
   shedId?: string;
 };
@@ -46,6 +46,9 @@ type Stocktake = {
 };
 
 type SiloCaps = Record<string, number>; // shedId -> capacity tonnes
+
+// NEW: pickups slice
+type Pickup = { id: string; date: string; shedId: string; birds: number };
 
 const T_PER_KG = 0.001;
 const LOAD_TONNES = 24;
@@ -114,10 +117,14 @@ export default function Dashboard() {
 
   const [settings] = useCloudSlice<Settings>("settings", { batchLengthDays: 42 });
   const [sheds] = useCloudSlice<Shed[]>("sheds", []);
+
   // morts can be stored in either key; merge
   const [mortsA] = useCloudSlice<MortsRow[]>("morts", []);
   const [mortsB] = useCloudSlice<MortsRow[]>("dailyLog", []);
   const mortsRows = useMemo(() => [...(mortsA || []), ...(mortsB || [])], [mortsA, mortsB]);
+
+  // NEW: pickups (birds removed for processing)
+  const [pickups] = useCloudSlice<Pickup[]>("pickups", []);
 
   // feed slices for silo estimation
   const [deliveries] = useCloudSlice<Delivery[]>("feedDeliveries", []);
@@ -129,7 +136,7 @@ export default function Dashboard() {
     [sheds]
   );
 
-  // Map shed -> base stats + daily consumption estimate
+  // Map shed -> base stats + daily consumption estimate (includes pickups in remaining birds)
   const perShed = useMemo(() => {
     const map = new Map<string, {
       shed: Shed;
@@ -137,12 +144,14 @@ export default function Dashboard() {
       birdsPlaced: number;
       morts: number;
       culls: number;
+      picked: number;
       remaining: number;
       estFeedTonnesPerDay: number;
     }>();
     for (const s of shedsSorted) {
       const birdsPlaced = num(s.birdsPlaced ?? s.placementBirds);
-      const age = daysSince(s.placementDate) + 1; // day age (1-based)
+      const age = daysSince(s.placementDate) + 1; // 1-based day age
+
       let morts = 0, culls = 0;
       for (const r of mortsRows) {
         const isThis =
@@ -155,13 +164,29 @@ export default function Dashboard() {
           num(r.cullRunts) + num(r.cullLegs) + num(r.cullNonStart) + num(r.cullOther);
         culls += cullSum;
       }
-      const remainingBirds = Math.max(0, birdsPlaced - morts - culls);
+
+      let picked = 0;
+      for (const p of pickups || []) {
+        if (p.shedId === s.id) picked += num(p.birds);
+      }
+
+      const remainingBirds = Math.max(0, birdsPlaced - morts - culls - picked);
       const gPerBird = feedPerBirdG(age);
       const estFeedTonnesPerDay = remainingBirds * gPerBird * T_PER_KG / 1000; // g -> kg -> t
-      map.set(s.id, { shed: s, age, birdsPlaced, morts, culls, remaining: remainingBirds, estFeedTonnesPerDay });
+
+      map.set(s.id, {
+        shed: s,
+        age,
+        birdsPlaced,
+        morts,
+        culls,
+        picked,
+        remaining: remainingBirds,
+        estFeedTonnesPerDay
+      });
     }
     return map;
-  }, [shedsSorted, mortsRows]);
+  }, [shedsSorted, mortsRows, pickups]);
 
   const totals = useMemo(() => {
     let placed = 0, remaining = 0, allMorts = 0, allCulls = 0, estFeedT = 0;
@@ -333,7 +358,7 @@ export default function Dashboard() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {shedsSorted.map((s) => {
           const v = perShed.get(s.id)!;
-          const pct = Math.min(100, Math.round((v.age / batchLen) * 100));
+          const pct = Math.min(100, Math.round(((daysSince(s.placementDate) + 1) / batchLen) * 100));
           return (
             <div key={s.id} className="rounded border p-4 bg-white">
               <div className="flex items-center justify-between">
