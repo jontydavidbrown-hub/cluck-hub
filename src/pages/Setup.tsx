@@ -18,22 +18,24 @@ type FeedQuotas = {
   starter: number;   // 24t loads
   grower: number;    // 24t loads
   finisher: number;  // 24t loads
-  booster: number;   // 24t loads (0 = unlimited/as needed)
 };
 
 // Helpers
 const clampNonNeg = (v: any) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
-const uuid = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : String(Math.random()).slice(2));
+const uuid = () =>
+  (typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : String(Math.random()).slice(2));
 
 export default function Setup() {
   // Cloud-synced slices (scoped by farm via useCloudSlice implementation)
   const [settings, setSettings] = useCloudSlice<Settings>("settings", { batchLengthDays: 42 });
   const [sheds, setSheds] = useCloudSlice<Shed[]>("sheds", []);
+  // Booster removed — only Starter/Grower/Finisher
   const [feedQuotas, setFeedQuotas] = useCloudSlice<FeedQuotas>("feedQuotas", {
     starter: 4,
     grower: 8,
     finisher: 12,
-    booster: 0,
   });
 
   const [justSaved, setJustSaved] = useState<null | string>(null);
@@ -61,7 +63,7 @@ export default function Setup() {
     // Force a push by setting to shallow-copied values
     setSheds([...(sheds || [])]);
     setSettings({ ...(settings || {}) });
-    setFeedQuotas({ ...(feedQuotas || { starter: 0, grower: 0, finisher: 0, booster: 0 }) });
+    setFeedQuotas({ ...(feedQuotas || { starter: 0, grower: 0, finisher: 0 }) });
     setJustSaved("Saved ✓");
     window.setTimeout(() => setJustSaved(null), 1500);
   }
@@ -184,11 +186,11 @@ export default function Setup() {
         )}
       </div>
 
-      {/* Feed Quotas (24t loads) */}
+      {/* Feed Quotas (24t loads) — Booster removed */}
       <div className="p-4 border rounded-2xl bg-white">
         <div className="font-medium mb-3">Feed Quotas (24t loads)</div>
 
-        <div className="grid md:grid-cols-4 gap-3">
+        <div className="grid md:grid-cols-3 gap-3">
           <label className="block">
             <div className="text-sm mb-1">Starter</div>
             <input
@@ -239,28 +241,10 @@ export default function Setup() {
               }
             />
           </label>
-
-          <label className="block">
-            <div className="text-sm mb-1">Booster</div>
-            <input
-              type="number"
-              min={0}
-              className="w-full border rounded px-3 py-2 placeholder-transparent"
-              placeholder="0"
-              value={Number.isFinite(feedQuotas.booster) ? feedQuotas.booster : ""}
-              onChange={(e) =>
-                setFeedQuotas({
-                  ...feedQuotas,
-                  booster: clampNonNeg(e.target.value || 0), // 0 = unlimited
-                })
-              }
-            />
-          </label>
         </div>
 
         <p className="mt-2 text-xs text-slate-500">
-          Enter the planned number of <strong>24t loads</strong> for each feed type. Set{" "}
-          <strong>Booster</strong> to <strong>0</strong> if it’s unlimited/as needed.
+          Enter the planned number of <strong>24t loads</strong> for each feed type.
         </p>
       </div>
     </div>
