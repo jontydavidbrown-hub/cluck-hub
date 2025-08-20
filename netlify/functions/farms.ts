@@ -6,9 +6,11 @@ interface Farm {
   name: string;
 }
 
-const FARMS_KEY = "farms_list";
+const STORE_NAME = "app-data";         // name of your site-wide store (any string w/o "/" or ":")
+const FARMS_KEY  = "farms_list";       // key inside the store
 
-// Adjust this list to the orphaned datasets your app uses
+// Keys that may exist if the user added data before farms existed.
+// Adjust this list to match your app.
 const ORPHAN_KEYS = [
   "morts",
   "feed",
@@ -25,28 +27,10 @@ const headers = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-// Use dynamic import to avoid ESM/CJS crash with @netlify/blobs
-async function blobs() {
-  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
-  const mod: typeof import("@netlify/blobs") = await import("@netlify/blobs");
-  return mod;
-}
-
-async function loadFarms() {
-  const { get } = await blobs();
-  const stored = await get(FARMS_KEY);
-  if (!stored) return [] as Farm[];
-  try {
-    const json = await stored.json();
-    return Array.isArray(json) ? (json as Farm[]) : [];
-  } catch {
-    return [] as Farm[];
-  }
-}
-
-async function saveFarms(farms: Farm[]) {
-  const { set } = await blobs();
-  await set(FARMS_KEY, JSON.stringify(farms));
+// dynamic import to avoid ESM/CJS crash
+async function getStoreApi() {
+  const { getStore } = await import("@netlify/blobs");
+  return getStore(STORE_NAME);
 }
 
 function makeId() {
@@ -54,19 +38,29 @@ function makeId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+async function loadFarms(): Promise<Farm[]> {
+  const store = await getStoreApi();
+  const list = (await store.get(FARMS_KEY, { type: "json" })) as Farm[] | null;
+  return Array.isArray(list) ? list : [];
+}
+
+async function saveFarms(farms: Farm[]) {
+  const store = await getStoreApi();
+  await store.setJSON(FARMS_KEY, farms);
+}
+
 async function migrateOrphansToFarm(farmId: string) {
-  const { get, set } = await blobs();
+  const store = await getStoreApi();
 
   for (const key of ORPHAN_KEYS) {
     const fromKey = `data/${key}`;
     try {
-      const res = await get(fromKey);
-      if (!res) continue;
-      const value = await res.json(); // if you stored text, change to await res.text()
+      const value = await store.get(fromKey, { type: "json" });
+      if (value == null) continue; // nothing to migrate
       const toKey = `farm/${farmId}/${key}`;
-      await set(toKey, JSON.stringify(value));
+      await store.setJSON(toKey, value);
     } catch {
-      // Skip individual failures; don’t block farm creation.
+      // skip individual failures; don’t block creation
     }
   }
 }
@@ -79,37 +73,36 @@ export const handler: Handler = async (event) => {
   try {
     let farms = await loadFarms();
 
+    // GET: list farms
     if (event.httpMethod === "GET") {
       return { statusCode: 200, headers, body: JSON.stringify(farms) };
     }
 
+    // POST: create farm (and if it's the first, migrate orphaned data into it)
     if (event.httpMethod === "POST") {
       const body = JSON.parse(event.body || "{}");
-      const name = (body?.name ?? "").toString().trim();
+      const name = String(body?.name ?? "").trim();
       if (!name) {
         return { statusCode: 400, headers, body: "Farm must have a name" };
       }
 
       const hadNoFarms = farms.length === 0;
       const newFarm: Farm = { id: makeId(), name };
+
       farms.push(newFarm);
       await saveFarms(farms);
 
       if (hadNoFarms) {
-        // One‑time: move orphaned data into the very first farm ever created
-        try {
-          await migrateOrphansToFarm(newFarm.id);
-        } catch {
-          // swallow migration errors; creation still succeeds
-        }
+        try { await migrateOrphansToFarm(newFarm.id); } catch {}
       }
 
       return { statusCode: 200, headers, body: JSON.stringify(newFarm) };
     }
 
+    // DELETE: remove farm
     if (event.httpMethod === "DELETE") {
       const body = JSON.parse(event.body || "{}");
-      const id = (body?.id ?? "").toString().trim();
+      const id = String(body?.id ?? "").trim();
       if (!id) {
         return { statusCode: 400, headers, body: "Farm id required" };
       }
