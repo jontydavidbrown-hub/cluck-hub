@@ -95,3 +95,35 @@ input[type="number"]::placeholder { color: transparent; opacity: 0; }
     text-align: center;
   }
 }
+
+/* Auto-place compact sections side-by-side when they fit */
+@layer components {
+  /* 1) Upgrade stacks into a responsive grid if there are compact form cards */
+  .space-y-6:has(> .p-4.border.rounded-2xl.bg-white:has(> form)),
+  .space-y-6:has(> .card:has(> form)) {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+    gap: 1.5rem; /* matches Tailwind space-y-6 size */
+    align-items: start;
+  }
+
+  /* 2) Cancel the vertical margins injected by space-y-* for grid children */
+  .space-y-6:has(> .p-4.border.rounded-2xl.bg-white:has(> form)) > *,
+  .space-y-6:has(> .card:has(> form)) > * {
+    margin: 0 !important;
+  }
+
+  /* 3) Make the page heading span the full row */
+  .space-y-6:has(> .p-4.border.rounded-2xl.bg-white:has(> form)) > h1,
+  .space-y-6:has(> .card:has(> form)) > h1 {
+    grid-column: 1 / -1;
+  }
+
+  /* 4) Keep big content (tables) full-width */
+  .space-y-6:has(> .p-4.border.rounded-2xl.bg-white:has(> form))
+    > .p-4.border.rounded-2xl.bg-white:has(> table),
+  .space-y-6:has(> .card:has(> form))
+    > .card:has(> table) {
+    grid-column: 1 / -1;
+  }
+}
