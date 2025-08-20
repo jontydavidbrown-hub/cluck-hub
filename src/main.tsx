@@ -5,7 +5,6 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import App from "./App";
 import "./index.css";
 import Pickups from "./pages/Pickups";
-
 { path: "/pickups", element: <Pickups /> },
 
 import Dashboard from "./pages/Dashboard";
