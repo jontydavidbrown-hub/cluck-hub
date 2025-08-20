@@ -6,7 +6,7 @@ import React, {
   useCallback,
 } from "react";
 
-type Farm = { id: string; name?: string };
+type Farm = { id: string; name: string };
 
 interface FarmContextType {
   farms: Farm[];
@@ -14,68 +14,87 @@ interface FarmContextType {
   setFarmId: (id: string) => void;
   createFarm: (name: string) => Promise<void>;
   deleteFarm: (id: string) => Promise<void>;
+  loading: boolean;
+  error: string | null;
 }
 
 const FarmContext = createContext<FarmContextType | undefined>(undefined);
 
-export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
+async function fetchJSON(input: RequestInfo, init?: RequestInit) {
+  const res = await fetch(input, { credentials: "include", ...init });
+  const text = await res.text();
+  let data: any = undefined;
+  try {
+    data = text ? JSON.parse(text) : undefined;
+  } catch {
+    // ignore
+  }
+  if (!res.ok) {
+    const msg = (data && (data.error || data.message)) || res.statusText || "Request failed";
+    throw new Error(msg);
+  }
+  return data;
+}
+
+export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [farms, setFarms] = useState<Farm[]>([]);
   const [farmId, setFarmIdState] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Load farms from API (Netlify function) on mount
+  // Load farms on mount
   useEffect(() => {
-    fetch("/.netlify/functions/farms", { credentials: "include" })
-      .then((res) => res.json())
-      .then((data) => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await fetchJSON("/.netlify/functions/farms");
+        if (!alive) return;
         if (Array.isArray(data)) {
           setFarms(data);
           if (data.length > 0 && !farmId) {
             setFarmIdState(data[0].id);
           }
         }
-      })
-      .catch((err) => console.error("Failed to fetch farms:", err));
+      } catch (e: any) {
+        if (alive) setError(e?.message || "Failed to load farms");
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Create farm and persist to backend
   const createFarm = useCallback(async (name: string) => {
-    try {
-      const response = await fetch("/.netlify/functions/farms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ name }),
-      });
-      if (!response.ok) throw new Error(await response.text());
-      const savedFarm = await response.json();
-      setFarms((prev) => [...prev, savedFarm]);
-      setFarmIdState(savedFarm.id);
-    } catch (err) {
-      console.error("Failed to create farm:", err);
+    setError(null);
+    const payload = { name: String(name || "").trim() };
+    if (!payload.name) {
+      setError("Please enter a farm name.");
+      return;
     }
+    const created = await fetchJSON("/.netlify/functions/farms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    setFarms((prev) => [...prev, created]);
+    setFarmIdState(created.id);
   }, []);
 
-  // Delete farm and persist to backend
   const deleteFarm = useCallback(async (id: string) => {
-    try {
-      const response = await fetch("/.netlify/functions/farms", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ id }),
-      });
-      if (!response.ok) throw new Error(await response.text());
-      setFarms((prev) => prev.filter((f) => f.id !== id));
-      if (farmId === id) {
-        setFarmIdState(null);
-      }
-    } catch (err) {
-      console.error("Failed to delete farm:", err);
-    }
-  }, [farmId]);
+    setError(null);
+    await fetchJSON("/.netlify/functions/farms", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ id }),
+    });
+    setFarms((prev) => prev.filter((f) => f.id !== id));
+    setFarmIdState((prev) => (prev === id ? null : prev));
+  }, []);
 
   return (
     <FarmContext.Provider
@@ -85,6 +104,8 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({
         setFarmId: setFarmIdState,
         createFarm,
         deleteFarm,
+        loading,
+        error,
       }}
     >
       {children}
@@ -93,9 +114,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({
 };
 
 export const useFarm = (): FarmContextType => {
-  const context = useContext(FarmContext);
-  if (!context) {
-    throw new Error("useFarm must be used within FarmProvider");
-  }
-  return context;
+  const ctx = useContext(FarmContext);
+  if (!ctx) throw new Error("useFarm must be used within FarmProvider");
+  return ctx;
 };
