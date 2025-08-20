@@ -1,136 +1,83 @@
 // src/lib/cloudSlice.ts
-import React, { useEffect, useRef, useContext } from "react";
-import { useServerState } from "./serverState";
+import * as React from "react";
+import { dataGet, dataSet } from "./storage";
 import { useFarm } from "./FarmContext";
 
-function jsonEqual(a: any, b: any) {
-  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
-}
-function debounce<T extends (...args: any[]) => any>(fn: T, ms: number) {
-  let t: any; return (...args: Parameters<T>) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
-}
+type SetState<T> = React.Dispatch<React.SetStateAction<T>>;
 
-type Options = { pollMs?: number };
+const isEqual = (a: any, b: any) => {
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return a === b; }
+};
 
-/**
- * useCloudSlice(key, initial, opts?)
- *
- * - Local state is **scoped by farm** (key becomes "<farmId>/<key>")
- * - Resets to `initial` when farm changes (so new farm starts blank)
- * - Pulls from Netlify Blobs on mount and on farm/key change
- * - Debounced push to Blobs when local changes (after initial pull)
- * - Also pulls on window focus / visibility and optional background polling
- */
-export function useCloudSlice<T>(key: string, initial: T, opts?: Options) {
-  const { farmId } = useFarm() as any;
-  const pollMs = opts?.pollMs ?? 30000;
+export function useCloudSlice<T>(sliceKey: string, initial: T): [T, SetState<T>, { saving: boolean; error: string | null }] {
+  const { email, farmId } = useFarm();
+  const [value, setValue] = React.useState<T>(initial);
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const keyRef = React.useRef<string | null>(null);
+  const queuedRef = React.useRef<any>(null);
+  const timerRef = React.useRef<any>(null);
 
-  // Derive the farm-scoped key we will use for BOTH local cache and remote fetch.
-  const scopedKey = `${farmId ?? "default"}/${key}`;
+  const scopedKey = React.useMemo(() => {
+    if (!email || !farmId) return null;
+    return `u/${encodeURIComponent(email)}/f/${farmId}/${sliceKey}`;
+  }, [email, farmId, sliceKey]);
 
-  // Local state is also per-farm now (IMPORTANT)
-  const { state: local, setState: setLocal } = useServerState<T>(scopedKey, initial);
-
-  // Track switching to prevent accidental pushes during farm change
-  const suppressPushRef = useRef(true);
-  const lastPulledHash = useRef<string>(""); // to avoid loops
-  const pullingCtrl = useRef<AbortController | null>(null);
-  const lastScopedKeyRef = useRef<string>(scopedKey);
-
-  // --- Pull once helper ---
-  async function pullOnce(k = scopedKey) {
-    try {
-      pullingCtrl.current?.abort();
-      const ctrl = new AbortController();
-      pullingCtrl.current = ctrl;
-
-      const res = await fetch(`/.netlify/functions/data?key=${encodeURIComponent(k)}`, {
-        credentials: "include",
-        signal: ctrl.signal,
-      });
-
-      // If 404/missing, treat as no data (keep `initial`) but allow future pushes
-      if (!res.ok) {
-        suppressPushRef.current = false;
-        return;
-      }
-
-      const json = await res.json(); // { value }
-      if (json?.value !== undefined && !jsonEqual(json.value, local)) {
-        setLocal(json.value);
-        try { lastPulledHash.current = JSON.stringify(json.value); } catch {}
-      }
-    } catch {
-      // ignore network/auth blips
-    } finally {
-      suppressPushRef.current = false;
-    }
-  }
-
-  // --- On farm or key change: reset local to initial and pull fresh ---
-  useEffect(() => {
-    if (lastScopedKeyRef.current !== scopedKey) {
-      lastScopedKeyRef.current = scopedKey;
-      suppressPushRef.current = true; // don’t push during switch
-      setLocal(initial);              // show clean slate immediately
-      pullOnce(scopedKey);            // fetch the new farm’s data
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopedKey]);
-
-  // Initial pull on mount
-  useEffect(() => {
-    suppressPushRef.current = true;
-    pullOnce(scopedKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // mount only; farm/key changes handled above
-
-  // Pull on focus / visibility
-  useEffect(() => {
-    function onFocus() { pullOnce(scopedKey); }
-    function onVis() { if (document.visibilityState === "visible") pullOnce(scopedKey); }
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopedKey]);
-
-  // Optional background polling
-  useEffect(() => {
-    if (!pollMs) return;
-    const id = setInterval(() => pullOnce(scopedKey), pollMs);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopedKey, pollMs]);
-
-  // Debounced push
-  const push = useRef(
-    debounce(async (value: T, k: string) => {
+  // pull on mount and whenever scope changes
+  React.useEffect(() => {
+    let alive = true;
+    (async () => {
+      setError(null);
+      if (!scopedKey) { setValue(initial); return; }
+      keyRef.current = scopedKey;
       try {
-        if (suppressPushRef.current) return; // block during farm switches / first load
-        const body = JSON.stringify(value);
-        if (lastPulledHash.current && lastPulledHash.current === body) return; // no-op
-        await fetch(`/.netlify/functions/data?key=${encodeURIComponent(k)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body,
-        });
-        lastPulledHash.current = body;
-      } catch {
-        // ignore, next change will retry
+        const serverVal = await dataGet<T>(scopedKey);
+        if (!alive) return;
+        if (serverVal !== undefined && !isEqual(serverVal, value)) {
+          setValue(serverVal as T);
+        } else if (serverVal === undefined) {
+          // initialize empty slice on server (optional)
+          await dataSet(scopedKey, initial);
+        }
+      } catch (e: any) {
+        if (alive) setError(e?.message || "Failed to load");
       }
-    }, 500)
-  ).current;
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedKey]);
 
-  // Push to cloud when the slice changes
-  useEffect(() => {
-    push(local, scopedKey);
-  }, [local, scopedKey, push]);
+  // debounced push
+  const flush = React.useCallback(async () => {
+    if (!scopedKey) return;
+    const next = queuedRef.current;
+    queuedRef.current = null;
+    if (next === null || next === undefined) return;
+    setSaving(true);
+    try {
+      await dataSet(scopedKey, next);
+    } catch (e: any) {
+      setError(e?.message || "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }, [scopedKey]);
 
-  // Same tuple API as before
-  return [local, setLocal] as const;
+  // setter that queues debounced save
+  const setAndQueue: SetState<T> = React.useCallback((updater) => {
+    setValue(prev => {
+      const next = typeof updater === "function" ? (updater as any)(prev) : updater;
+      // do not attempt to write without scope (blocks orphan writes)
+      if (scopedKey) {
+        queuedRef.current = next;
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(flush, 500);
+      }
+      return next;
+    });
+  }, [flush, scopedKey]);
+
+  React.useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+
+  return [value, setAndQueue, { saving, error }];
 }
