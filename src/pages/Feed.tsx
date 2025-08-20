@@ -7,7 +7,7 @@ const FEED_TYPES = ["starter", "grower", "finisher"] as const;
 
 type FeedQuotas = Partial<Record<FeedType, number>>; // from Setup (loads of 24t each)
 
-// Deliveries now store exact tonnes; legacy "loads" still supported (auto-converted)
+// Deliveries store exact tonnes; legacy "loads" still supported (auto-converted)
 type Delivery = {
   id: string;
   date: string;          // YYYY-MM-DD
@@ -78,7 +78,8 @@ export default function Feed() {
       const deliveredLoads = deliveredLoadsByType[t] || 0;
       const loadsRemaining = Math.max(0, quotaLoads - deliveredLoads);
       const tonnesRemaining = loadsRemaining * LOAD_TONNES;
-      const title = t === "starter" ? "Starter" : t === "grower" ? "Grower" : "Finisher";
+      const title =
+        t === "starter" ? "Starter" : t === "grower" ? "Grower" : "Finisher";
       return {
         key: t,
         title,
@@ -90,8 +91,7 @@ export default function Feed() {
 
   // Add a delivery (exact tonnes)
   function addDelivery() {
-    const tonnes =
-      draftTonnes === "" ? 0 : Math.max(0, Number(draftTonnes));
+    const tonnes = draftTonnes === "" ? 0 : Math.max(0, Number(draftTonnes));
     if (!draftDate || !draftType || !(tonnes > 0)) return;
 
     const entry: Delivery = {
@@ -134,13 +134,14 @@ export default function Feed() {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {remaining.map((r) => (
               <div key={r.key} className="rounded border p-4 bg-white">
-                <div className="text-xs text-slate-500">{r.title}</div>
+                <div className="text-xs text-slate-500">
+                  {r.title} Remaining (Loads)
+                </div>
                 <div className="text-lg font-semibold mt-1">
-                  {r.loadsRemaining.toLocaleString(undefined, {
-                    minimumFractionDigits: 1,
-                    maximumFractionDigits: 1,
-                  })}{" "}
-                  loads remaining
+                  {Math.max(0, r.loadsRemaining).toLocaleString(undefined, {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0,
+                  })}
                 </div>
                 <div className="text-xs text-slate-500 mt-1">
                   {r.tonnesRemaining.toLocaleString(undefined, {
@@ -231,10 +232,17 @@ export default function Feed() {
                         <td className="py-2 pr-2">{r.date}</td>
                         <td className="py-2 pr-2 capitalize">{r.type}</td>
                         <td className="py-2 pr-2">
-                          {tonnes.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} t
+                          {tonnes.toLocaleString(undefined, {
+                            minimumFractionDigits: 1,
+                            maximumFractionDigits: 1,
+                          })}{" "}
+                          t
                         </td>
                         <td className="py-2 pr-2">
-                          {loadsApprox.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                          {loadsApprox.toLocaleString(undefined, {
+                            minimumFractionDigits: 1,
+                            maximumFractionDigits: 1,
+                          })}
                         </td>
                         <td className="py-2 pr-2">
                           <button
