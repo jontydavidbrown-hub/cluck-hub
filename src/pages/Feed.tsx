@@ -9,6 +9,26 @@ type Shed = {
   name: string;
 };
 
+type FeedQuotas = { starter?: number; grower?: number; finisher?: number; booster?: number };
+
+function hasAnyQuota(q?: FeedQuotas) {
+  if (!q) return false;
+  return (["starter", "grower", "finisher", "booster"] as const).some((k) => {
+    const v = (q as any)[k];
+    // consider set if it’s a finite number (including 0)
+    return v !== undefined && v !== null && Number.isFinite(Number(v));
+  });
+}
+
+function normalizeQuotas(q?: FeedQuotas): Required<FeedQuotas> {
+  return {
+    starter: Number(q?.starter ?? 0),
+    grower: Number(q?.grower ?? 0),
+    finisher: Number(q?.finisher ?? 0),
+    booster: Number(q?.booster ?? 0),
+  };
+}
+
 type Settings = {
   // Preferred: array of feed types
   //   [{ name: "Starter", quotaKg: 4000 }, { name: "Grower", quotaKg: 8000 }, ...]
