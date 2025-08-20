@@ -38,3 +38,32 @@ input[type="number"]::placeholder { color: transparent; opacity: 0; }
 .animate-blob { animation: blob 12s infinite ease-in-out; }
 .animation-delay-2000 { animation-delay: 2s; }
 .animation-delay-4000 { animation-delay: 4s; }
+
+/* === Compact, content-aware sizing for controls across cards === */
+@layer base {
+  /* Center common inline form rows */
+  .form-center {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.75rem; /* 12px */
+  }
+
+  /* Gently cap control width inside cards; mobile still full width */
+  .card label > input,
+  .card label > select,
+  .card label > textarea {
+    max-width: 18rem; /* ~288px */
+    width: 100%;
+  }
+
+  /* Optional narrower/wider caps you can add per-field if needed */
+  .control-sm { max-width: 12rem; } /* 192px */
+  .control-md { max-width: 16rem; } /* 256px */
+  .control-lg { max-width: 20rem; } /* 320px */
+}
+
+/* Keep tables and long text areas unconstrained unless you opt-in */
+@layer components {
+  .control-full { max-width: none !important; }
+}
