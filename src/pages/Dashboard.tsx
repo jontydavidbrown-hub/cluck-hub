@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { useCloudSlice } from "../lib/cloudSlice";
 import { useNavigate } from "react-router-dom";
 import { estimateShedFeedKgToday } from "../lib/rossFeed";
-import FeedStocktakeLightboxButton from "../components/FeedStocktakeLightboxButton";
+import FeedStocktakeButton from "../components/FeedStocktakeButton";
 
 type Shed = {
   id: string;
