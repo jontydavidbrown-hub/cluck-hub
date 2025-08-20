@@ -1,31 +1,32 @@
 // src/pages/Feed.tsx
 import { useMemo, useState } from "react";
 import { useCloudSlice } from "../lib/cloudSlice";
-import { estimateShedFeedKgToday } from "../lib/rossFeed";
 
-/**
- * Types
- */
+/* ========= Types ========= */
+
 type Shed = {
   id: string;
   name: string;
-  placementDate?: string;      // YYYY-MM-DD
-  placementBirds?: number;     // legacy
-  birdsPlaced?: number;        // current
 };
 
-type DailyLogRow = {
+type Settings = {
+  // Preferred: array of feed types
+  //   [{ name: "Starter", quotaKg: 4000 }, { name: "Grower", quotaKg: 8000 }, ...]
+  feedTypes?: Array<{ name?: string; quotaKg?: number }>;
+
+  // Back-compat: object map
+  //   { Starter: 4000, Grower: 8000, Finisher: 6000 }
+  feedQuotas?: Record<string, number>;
+};
+
+type FeedDelivery = {
   id: string;
-  date: string;                // YYYY-MM-DD
-  shed?: string;
-  // structured morts/culls (compat with your other pages)
-  morts?: number;
-  cullRunts?: number;
-  cullLegs?: number;
-  cullNonStart?: number;
-  cullOther?: number;
-  culls?: number;
-  mortalities?: number;        // morts + culls (if saved as total)
+  date: string;         // YYYY-MM-DD
+  feedType?: string;    // "Starter" | "Grower" | "Finisher" | etc.
+  kg?: number;          // explicit kilograms
+  tonnes?: number;      // or explicit tonnes
+  t?: number;           // alias for tonnes
+  // optional shedId, notes, etc. are ignored for quota math
 };
 
 type FeedStocktakeRow = {
@@ -33,136 +34,93 @@ type FeedStocktakeRow = {
   date: string;         // YYYY-MM-DD
   shedId: string;
   shedName?: string;
-  kgRemaining: number;  // stocktake value (actual) at "date"
+  kgRemaining: number;
 };
 
-type Settings = {
-  batchLengthDays?: number;
-};
+/* ========= Utils ========= */
 
-/**
- * Helpers
- */
-function daysBetweenUTC(a?: string, b?: string) {
-  if (!a || !b) return 0;
-  const A = new Date(a + "T00:00:00Z").getTime();
-  const B = new Date(b + "T00:00:00Z").getTime();
-  return Math.floor((B - A) / (1000 * 60 * 60 * 24));
+function toKg(row: Partial<FeedDelivery>): number {
+  const kg = Number(row.kg);
+  if (isFinite(kg) && kg > 0) return kg;
+  const tonnes = Number(row.tonnes ?? row.t);
+  if (isFinite(tonnes) && tonnes > 0) return tonnes * 1000;
+  return 0;
 }
 
-function cullsOnly(r: Partial<DailyLogRow>) {
-  if (typeof r.culls === "number") return Math.max(0, r.culls);
-  const sum =
-    (Number(r.cullRunts) || 0) +
-    (Number(r.cullLegs) || 0) +
-    (Number(r.cullNonStart) || 0) +
-    (Number(r.cullOther) || 0);
-  return Math.max(0, sum);
+function fmtTonnes(kg: number): string {
+  const t = kg / 1000;
+  return t.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " t";
 }
 
-function mortsOnly(r: Partial<DailyLogRow>) {
-  return Math.max(0, Number(r.morts) || 0);
+function rid() {
+  return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 }
 
-/**
- * Page
- */
+/* ========= Page ========= */
+
 export default function FeedPage() {
-  // Data
-  const [sheds] = useCloudSlice<Shed[]>("sheds", []);
-  const [dailyLog] = useCloudSlice<DailyLogRow[]>("dailyLog", []);
+  // Data sources
   const [settings] = useCloudSlice<Settings>("settings", {});
-  const [feedStocktake] = useCloudSlice<FeedStocktakeRow[]>("feedStocktake", []); // read-only; we emit events for writes
+  const [feedDeliveries] = useCloudSlice<FeedDelivery[]>("feedDeliveries", []);
+  const [sheds] = useCloudSlice<Shed[]>("sheds", []);
+  const [feedStocktake, setFeedStocktake] = useCloudSlice<FeedStocktakeRow[]>("feedStocktake", []);
 
   const today = new Date().toISOString().slice(0, 10);
-  const batchLen = Math.max(1, Number(settings.batchLengthDays ?? 42));
 
-  // Derived data used by tiles (live birds & today's est. feed use)
-  const {
-    perShedLiveBirds,
-    perShedAgeDays,
-    latestStocktakeByShed,
-    totalEstFeedKgToday,
-    feedTiles,
-  } = useMemo(() => {
-    const rows = dailyLog || [];
+  /* ----- Build feed type quotas list (name + quotaKg) ----- */
+  const quotas = useMemo(() => {
+    const list: { name: string; quotaKg: number }[] = [];
 
-    // Build mortalities per shed
-    const mortalitiesByShed = new Map<string, number>();
-    for (const r of rows) {
-      const key = (r.shed || "").trim();
-      if (!key) continue;
-      const mOnly = mortsOnly(r);
-      const cOnly = cullsOnly(r);
-      const mortalitiesTotal =
-        typeof r.mortalities === "number" ? Math.max(0, r.mortalities) : mOnly + cOnly;
-      mortalitiesByShed.set(key, (mortalitiesByShed.get(key) || 0) + mortalitiesTotal);
-    }
-
-    // Latest stocktake per shedId
-    const latestStocktakeByShed = new Map<string, FeedStocktakeRow>();
-    for (const row of feedStocktake || []) {
-      if (!row?.shedId || typeof row.kgRemaining !== "number") continue;
-      const prev = latestStocktakeByShed.get(row.shedId);
-      if (!prev || (row.date && prev.date && row.date > prev.date)) {
-        latestStocktakeByShed.set(row.shedId, row);
+    if (Array.isArray(settings.feedTypes) && settings.feedTypes.length) {
+      for (const ft of settings.feedTypes) {
+        const name = (ft?.name || "").trim();
+        const quotaKg = Math.max(0, Number(ft?.quotaKg) || 0);
+        if (name) list.push({ name, quotaKg });
+      }
+    } else if (settings.feedQuotas && typeof settings.feedQuotas === "object") {
+      for (const key of Object.keys(settings.feedQuotas)) {
+        const name = key.trim();
+        const quotaKg = Math.max(0, Number(settings.feedQuotas[key]) || 0);
+        if (name) list.push({ name, quotaKg });
       }
     }
 
-    let totalEstFeedKgToday = 0;
-    const perShedLiveBirds = new Map<string, number>();
-    const perShedAgeDays = new Map<string, number>();
+    // stable, alphabetical by name
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [settings]);
 
-    const feedTiles = (sheds || [])
-      .slice()
-      .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
-      .map((s) => {
-        const shedName = s.name || "";
-        const placed = Number(s.birdsPlaced ?? s.placementBirds) || 0;
+  /* ----- Sum deliveries per feed type ----- */
+  const deliveredByType = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const d of feedDeliveries || []) {
+      const type = (d.feedType || "").trim();
+      if (!type) continue;
+      const addKg = toKg(d);
+      if (addKg <= 0) continue;
+      m.set(type, (m.get(type) || 0) + addKg);
+    }
+    return m;
+  }, [feedDeliveries]);
 
-        const mortsTotal = mortalitiesByShed.get(shedName) || 0;
-        const liveBirds = Math.max(0, placed - mortsTotal);
+  /* ----- Build tiles: remaining per feed type (quota − delivered) ----- */
+  const feedTiles = useMemo(() => {
+    return quotas.map((q) => {
+      const used = deliveredByType.get(q.name) || 0;
+      const remainingKg = Math.max(0, q.quotaKg - used);
+      const pctUsed = q.quotaKg > 0 ? Math.min(100, Math.round((used / q.quotaKg) * 100)) : 0;
+      return {
+        name: q.name,
+        quotaKg: q.quotaKg,
+        usedKg: used,
+        remainingKg,
+        pctUsed,
+      };
+    });
+  }, [quotas, deliveredByType]);
 
-        let ageDays = 0;
-        if (s.placementDate) {
-          ageDays = daysBetweenUTC(s.placementDate, today);
-        }
-
-        // Today's estimated consumption for context (not shown big in tiles, but useful below)
-        const feedKgToday =
-          s.placementDate && liveBirds > 0
-            ? estimateShedFeedKgToday(ageDays, liveBirds)
-            : 0;
-        totalEstFeedKgToday += feedKgToday;
-
-        perShedLiveBirds.set(s.id, liveBirds);
-        perShedAgeDays.set(s.id, ageDays);
-
-        // Latest known actual remaining from stocktake
-        const latest = latestStocktakeByShed.get(s.id) || null;
-
-        return {
-          id: s.id,
-          name: shedName,
-          latestKg: latest?.kgRemaining ?? null,
-          latestDate: latest?.date ?? null,
-        };
-      });
-
-    return {
-      perShedLiveBirds,
-      perShedAgeDays,
-      latestStocktakeByShed,
-      totalEstFeedKgToday,
-      feedTiles,
-    };
-  }, [sheds, dailyLog, feedStocktake, batchLen, today]);
-
-  /**
-   * STOCKTAKE UI (simple & per-shed)
-   */
-  const [entry, setEntry] = useState<Record<string, string>>({}); // shedId -> input text
-  const [saving, setSaving] = useState<Record<string, boolean>>({}); // shedId -> busy
+  /* ----- Stocktake UI state (per shed) ----- */
+  const [entry, setEntry] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
 
   function onSaveStocktake(shedId: string, shedName: string) {
     const text = (entry[shedId] ?? "").trim();
@@ -173,24 +131,23 @@ export default function FeedPage() {
     }
     setSaving((m) => ({ ...m, [shedId]: true }));
 
-    // Dispatch an app-wide event to persist however you prefer
-    // Example: listen in your app root and write to your DB/cloud
-    window.dispatchEvent(
-      new CustomEvent("feed-stocktake", {
-        detail: {
-          shedId,
-          shedName,
-          kgRemaining: kg,
-          date: new Date().toISOString().slice(0, 10),
-        },
-      })
-    );
+    const row: FeedStocktakeRow = {
+      id: rid(),
+      date: today,
+      shedId,
+      shedName,
+      kgRemaining: kg,
+    };
 
-    // UX: pretend save completes quickly; clear input
+    // Append to the feedStocktake slice
+    const next = Array.isArray(feedStocktake) ? [...feedStocktake, row] : [row];
+    setFeedStocktake(next);
+
+    // UX clear
     setTimeout(() => {
       setSaving((m) => ({ ...m, [shedId]: false }));
       setEntry((m) => ({ ...m, [shedId]: "" }));
-    }, 300);
+    }, 250);
   }
 
   return (
@@ -198,43 +155,36 @@ export default function FeedPage() {
       {/* Title */}
       <h1 className="text-2xl font-semibold">Feed</h1>
 
-      {/* --- FEED REMAINING TILES --- */}
+      {/* Feed-type quota remaining tiles */}
       {feedTiles.length === 0 ? (
         <div className="card p-6 text-slate-600">
-          No sheds yet. Add one in <span className="font-medium">Setup</span>.
+          No feed quotas configured yet. Add quotas in <span className="font-medium">Setup</span>.
         </div>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           {feedTiles.map((t) => (
-            <div key={t.id} className="card p-4 flex flex-col gap-2">
-              <div className="text-lg font-semibold">{t.name || "—"}</div>
-              <div className="text-xs text-slate-500">Feed remaining</div>
-              <div className="text-2xl font-semibold">
-                {typeof t.latestKg === "number"
-                  ? `${t.latestKg.toLocaleString()} kg`
-                  : "—"}
+            <div key={t.name} className="rounded border p-4 bg-white flex flex-col gap-2">
+              <div className="text-xs text-slate-500">{t.name}</div>
+              <div className="text-2xl font-semibold">{fmtTonnes(t.remainingKg)}</div>
+              <div className="text-xs text-slate-500">remaining</div>
+
+              {/* small progress bar of quota used */}
+              <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden" title={`${t.pctUsed}% of quota used`}>
+                <div
+                  className="h-2 bg-slate-900 transition-[width] duration-500"
+                  style={{ width: `${t.pctUsed}%` }}
+                  aria-label={`${t.pctUsed}% used`}
+                />
               </div>
-              <div className="text-xs text-slate-500">
-                {t.latestDate ? `as at ${t.latestDate}` : "\u00A0"}
+              <div className="text-[11px] text-slate-500">
+                Used: {fmtTonnes(t.usedKg)} / {fmtTonnes(t.quotaKg)}
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Optional small total context (today's estimated consumption across all sheds) */}
-      <div className="rounded border p-4 bg-white">
-        <div className="text-xs text-slate-500">Estimated total feed use today</div>
-        <div className="text-2xl font-semibold">
-          {(totalEstFeedKgToday / 1000).toLocaleString(undefined, {
-            minimumFractionDigits: 1,
-            maximumFractionDigits: 1,
-          })}{" "}
-          t
-        </div>
-      </div>
-
-      {/* --- STOCKTAKE SECTION --- */}
+      {/* Stocktake section */}
       <section className="space-y-3">
         <h2 className="text-xl font-semibold">Stocktake</h2>
         <p className="text-slate-600 text-sm">
@@ -255,6 +205,7 @@ export default function FeedPage() {
                 const value = entry[shedId] ?? "";
                 const busy = !!saving[shedId];
 
+                // find last saved stocktake for display
                 const last = (feedStocktake || [])
                   .filter((r) => r.shedId === shedId)
                   .sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0))[0];
@@ -277,9 +228,7 @@ export default function FeedPage() {
                       className="w-full rounded border p-2"
                       placeholder="e.g. 1250"
                       value={value}
-                      onChange={(e) =>
-                        setEntry((m) => ({ ...m, [shedId]: e.target.value }))
-                      }
+                      onChange={(e) => setEntry((m) => ({ ...m, [shedId]: e.target.value }))}
                       min={0}
                       step="0.1"
                     />
