@@ -1,5 +1,5 @@
 // src/pages/Dashboard.tsx
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCloudSlice } from "../lib/cloudSlice";
 
@@ -49,6 +49,8 @@ type SiloCaps = Record<string, number>; // shedId -> capacity tonnes
 
 const T_PER_KG = 0.001;
 const LOAD_TONNES = 24;
+const MINUTES_PER_DAY = 1440;
+const ONE_MIN_MS = 60_000;
 
 // Approx daily feed per bird (grams) by age; piecewise linear
 function feedPerBirdG(age: number): number {
@@ -94,6 +96,22 @@ function deliveryTonnes(d: Delivery): number {
 export default function Dashboard() {
   const navigate = useNavigate();
 
+  // Re-render every 1 minute so silo consumption updates continuously
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const tick = () => setNowTick(Date.now());
+    const id = setInterval(tick, ONE_MIN_MS);
+    const onVis = () => { if (document.visibilityState === "visible") tick(); };
+    window.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", tick);
+    tick(); // align immediately on mount
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", tick);
+    };
+  }, []);
+
   const [settings] = useCloudSlice<Settings>("settings", { batchLengthDays: 42 });
   const [sheds] = useCloudSlice<Shed[]>("sheds", []);
   // morts can be stored in either key; merge
@@ -104,7 +122,7 @@ export default function Dashboard() {
   // feed slices for silo estimation
   const [deliveries] = useCloudSlice<Delivery[]>("feedDeliveries", []);
   const [stocktakes] = useCloudSlice<Stocktake[]>("feedStocktakes", []);
-  const [siloCaps] = useCloudSlice<SiloCaps>("siloCapacities", {}); // NEW
+  const [siloCaps] = useCloudSlice<SiloCaps>("siloCapacities", {});
 
   const shedsSorted = useMemo(
     () => [...(sheds || [])].sort((a, b) => (a?.name || "").localeCompare(b?.name || "")),
@@ -159,7 +177,7 @@ export default function Dashboard() {
 
   const batchLen = Math.max(1, num(settings.batchLengthDays || 42));
 
-  // ---- Silo estimates per shed (remaining t + % of capacity) ----
+  // ---- Silo estimates per shed (remaining t + % of capacity), using minute-level consumption ----
   const siloTiles = useMemo(() => {
     // latest stocktake by shed
     const latestST = new Map<string, Stocktake>();
@@ -190,7 +208,7 @@ export default function Dashboard() {
       capacityT?: number;
     }[] = [];
 
-    const now = new Date();
+    const now = new Date(nowTick);
 
     for (const s of shedsSorted) {
       const v = perShed.get(s.id);
@@ -217,9 +235,13 @@ export default function Dashboard() {
         if (deliveriesFor.length > 0) baseTime = parseYMD(deliveriesFor[0].date);
       }
 
-      let days = 0;
-      if (baseTime) days = Math.max(0, Math.floor((+now - +baseTime) / 86400000));
-      const consumptionSince = (v.estFeedTonnesPerDay || 0) * days;
+      // Minute-level consumption since baseTime
+      let minutes = 0;
+      if (baseTime) {
+        const ms = Math.max(0, now.getTime() - baseTime.getTime());
+        minutes = Math.floor(ms / ONE_MIN_MS);
+      }
+      const consumptionSince = (v.estFeedTonnesPerDay || 0) * (minutes / MINUTES_PER_DAY);
 
       const estRemaining = Math.max(0, baseT + deliveredSince - consumptionSince);
 
@@ -231,7 +253,7 @@ export default function Dashboard() {
 
     // limit to 4 tiles, stable order (already sorted by name)
     return rows.slice(0, 4);
-  }, [stocktakes, deliveries, shedsSorted, perShed, siloCaps]);
+  }, [stocktakes, deliveries, shedsSorted, perShed, siloCaps, nowTick]);
 
   function goAddWeights(s: Shed) {
     const qs = new URLSearchParams();
@@ -274,7 +296,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Silo feed remaining tiles (up to 4) — now based on CAPACITY */}
+      {/* Silo feed remaining tiles (up to 4) — capacity based, 1-minute updates */}
       {siloTiles.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {siloTiles.map(({ shed, remainingT, percent, capacityT }) => {
