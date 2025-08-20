@@ -53,3 +53,6 @@ export const useFarms = (): FarmContextType => {
   if (!context) throw new Error("useFarms must be used within FarmProvider");
   return context;
 };
+
+// ✅ Alias so old imports keep working
+export const useFarm = useFarms;
