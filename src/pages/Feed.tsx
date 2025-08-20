@@ -17,13 +17,14 @@ type SiloRow = {
   notes?: string;
 };
 
+// New stocktake shape: per-type snapshot with multiple shed entries
+type ShedEntry = { shed: string; tons: number };
 type Stocktake = {
   id: string;
-  date: string; // ISO string (yyyy-mm-dd)
-  starterT?: number;
-  growerT?: number;
-  finisherT?: number;
-  notes?: string;
+  date: string;        // ISO string (yyyy-mm-dd)
+  feedType: FeedType;  // the “current feed type” you’re on
+  totalTons: number;   // sum of shed entries
+  sheds: ShedEntry[];  // per-shed readings
 };
 
 type Delivery = {
@@ -42,8 +43,6 @@ type PlannedOrder = {
   reason?: string; // e.g. "Reorder threshold reached"
 };
 
-// Optional: if you already have quotes in setup, we’ll read them.
-// Expected minimal shape: { type: FeedType; targetT?: number; thresholdPct?: number }
 type FeedQuote = {
   type: FeedType;
   targetT?: number;      // preferred refill target tonnage
@@ -71,6 +70,9 @@ function daysBetween(aISO: string, bISO: string) {
   const b = new Date(bISO + "T00:00:00Z").getTime();
   return Math.max(0, Math.round((b - a) / (1000 * 60 * 60 * 24)));
 }
+function last<T>(arr: T[]): T | null {
+  return arr.length ? arr[arr.length - 1] : null;
+}
 
 // --------------------
 // Page component
@@ -82,11 +84,11 @@ export default function Feed() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [edit, setEdit] = useState<SiloRow | null>(null);
 
-  // NEW: stocktakes, deliveries, planned orders, optional quotes
-  const [stocktakes, setStocktakes] = useCloudSlice<Stocktake[]>("feedStocktakes", []);
+  // Stocktakes (new shape), deliveries, planned orders, optional quotes
+  const [stocktakes, setStocktakes] = useCloudSlice<any[]>("feedStocktakes", []); // any[] for backward-compat
   const [deliveries, setDeliveries] = useCloudSlice<Delivery[]>("feedDeliveries", []);
   const [planned, setPlanned] = useCloudSlice<PlannedOrder[]>("feedPlannedOrders", []);
-  const [quotes] = useCloudSlice<FeedQuote[]>("feedQuotes", []); // read if present (ok if empty)
+  const [quotes] = useCloudSlice<FeedQuote[]>("feedQuotes", []); // read if present
 
   // -------- Existing totals from silos ----------
   const sorted = useMemo(
@@ -109,16 +111,42 @@ export default function Feed() {
     return byType;
   }, [rows]);
 
-  // -------- Consumption estimate from stocktakes ----------
-  // Consumption per type (t/day) derived from stocktakes deltas + deliveries in between.
-  const consumptionPerType = useMemo(() => {
-    // Sort stocktakes by date
-    const s = [...(stocktakes || [])].sort((a, b) => a.date.localeCompare(b.date));
-    if (s.length < 2) {
-      return { Starter: 0, Grower: 0, Finisher: 0 } as Record<FeedType, number>;
-    }
+  // -------- Build per-type snapshots from stocktakes (supports new & old shapes) ----------
+  type TypeSnapshot = { date: string; total: number };
+  const snapshotsByType = useMemo(() => {
+    const map: Record<FeedType, TypeSnapshot[]> = {
+      Starter: [],
+      Grower: [],
+      Finisher: [],
+    };
+    (stocktakes || []).forEach((st: any) => {
+      // New shape
+      if (st && st.feedType && typeof st.totalTons !== "undefined") {
+        const ft = st.feedType as FeedType;
+        map[ft].push({ date: st.date, total: clampNum(st.totalTons) });
+        return;
+      }
+      // Backward-compat: old shape with starterT/growerT/finisherT in one record
+      if (st && st.date) {
+        if (typeof st.starterT !== "undefined")
+          map.Starter.push({ date: st.date, total: clampNum(st.starterT) });
+        if (typeof st.growerT !== "undefined")
+          map.Grower.push({ date: st.date, total: clampNum(st.growerT) });
+        if (typeof st.finisherT !== "undefined")
+          map.Finisher.push({ date: st.date, total: clampNum(st.finisherT) });
+      }
+    });
+    // sort each by date asc
+    (Object.keys(map) as FeedType[]).forEach((ft) =>
+      map[ft].sort((a, b) => a.date.localeCompare(b.date))
+    );
+    return map;
+  }, [stocktakes]);
 
-    // Helper: sum deliveries of a type between dates (exclusive of start, inclusive of end)
+  // -------- Consumption estimate from snapshots ----------
+  const consumptionPerType = useMemo(() => {
+    const out: Record<FeedType, number> = { Starter: 0, Grower: 0, Finisher: 0 };
+
     const deliveredBetween = (type: FeedType, startISO: string, endISO: string) => {
       const start = new Date(startISO + "T00:00:00Z").getTime();
       const end = new Date(endISO + "T00:00:00Z").getTime();
@@ -131,21 +159,21 @@ export default function Feed() {
         .reduce((sum, d) => sum + clampNum(d.tons), 0);
     };
 
-    const types: FeedType[] = ["Starter", "Grower", "Finisher"];
-    const out: Record<FeedType, number> = { Starter: 0, Grower: 0, Finisher: 0 };
-
-    types.forEach((ft) => {
+    (["Starter", "Grower", "Finisher"] as FeedType[]).forEach((ft) => {
+      const snaps = snapshotsByType[ft];
+      if (snaps.length < 2) {
+        out[ft] = 0;
+        return;
+      }
       let totalRate = 0;
       let segments = 0;
-      for (let i = 1; i < s.length; i++) {
-        const prev = s[i - 1];
-        const curr = s[i];
+      for (let i = 1; i < snaps.length; i++) {
+        const prev = snaps[i - 1];
+        const curr = snaps[i];
         const days = Math.max(1, daysBetween(prev.date, curr.date));
-        const prevQty = clampNum(ft === "Starter" ? prev.starterT : ft === "Grower" ? prev.growerT : prev.finisherT);
-        const currQty = clampNum(ft === "Starter" ? curr.starterT : ft === "Grower" ? curr.growerT : curr.finisherT);
         const del = deliveredBetween(ft, prev.date, curr.date);
-        // consumption = (prevQty + deliveries) - currQty
-        const consumed = Math.max(0, (prevQty + del) - currQty);
+        // consumption = (prev.total + deliveries) - curr.total
+        const consumed = Math.max(0, (prev.total + del) - curr.total);
         const rate = consumed / days; // t/day
         if (Number.isFinite(rate)) {
           totalRate += rate;
@@ -156,23 +184,19 @@ export default function Feed() {
     });
 
     return out;
-  }, [stocktakes, deliveries]);
+  }, [snapshotsByType, deliveries]);
 
   // -------- Estimated remaining feed today (by type) ----------
   const estimatedRemainingByType = useMemo(() => {
-    // Use the latest stocktake as the base snapshot; if none, fall back to current silos.
-    const latest = [...(stocktakes || [])].sort((a, b) => b.date.localeCompare(a.date))[0];
     const todayISO = toISODate(new Date());
-    const spanDays = latest ? daysBetween(latest.date, todayISO) : 0;
 
-    const base: Record<FeedType, number> = {
-      Starter: latest ? clampNum(latest.starterT) : typeTotalsFromSilos.Starter,
-      Grower: latest ? clampNum(latest.growerT) : typeTotalsFromSilos.Grower,
-      Finisher: latest ? clampNum(latest.finisherT) : typeTotalsFromSilos.Finisher,
+    const latestByType: Record<FeedType, TypeSnapshot | null> = {
+      Starter: last(snapshotsByType.Starter),
+      Grower:  last(snapshotsByType.Grower),
+      Finisher:last(snapshotsByType.Finisher),
     };
 
-    // Add deliveries since the snapshot
-    const addDeliveries = (type: FeedType, sinceISO?: string) =>
+    const addDeliveriesSince = (type: FeedType, sinceISO?: string) =>
       (deliveries || [])
         .filter((d) => d.type === type)
         .filter((d) => (sinceISO ? d.date > sinceISO : true))
@@ -180,14 +204,20 @@ export default function Feed() {
 
     const cons = consumptionPerType;
 
-    const est: Record<FeedType, number> = {
-      Starter: Math.max(0, base.Starter + addDeliveries("Starter", latest?.date) - cons.Starter * spanDays),
-      Grower: Math.max(0, base.Grower + addDeliveries("Grower", latest?.date) - cons.Grower * spanDays),
-      Finisher: Math.max(0, base.Finisher + addDeliveries("Finisher", latest?.date) - cons.Finisher * spanDays),
-    };
+    const starterBase = latestByType.Starter ? latestByType.Starter.total : typeTotalsFromSilos.Starter;
+    const growerBase  = latestByType.Grower  ? latestByType.Grower.total  : typeTotalsFromSilos.Grower;
+    const finisherBase= latestByType.Finisher? latestByType.Finisher.total: typeTotalsFromSilos.Finisher;
 
-    return est;
-  }, [stocktakes, deliveries, typeTotalsFromSilos, consumptionPerType]);
+    const starterDays = latestByType.Starter ? daysBetween(latestByType.Starter.date, todayISO) : 0;
+    const growerDays  = latestByType.Grower  ? daysBetween(latestByType.Grower.date,  todayISO) : 0;
+    const finisherDays= latestByType.Finisher? daysBetween(latestByType.Finisher.date,todayISO) : 0;
+
+    return {
+      Starter: Math.max(0, starterBase  + addDeliveriesSince("Starter",  latestByType.Starter?.date)  - cons.Starter  * starterDays),
+      Grower:  Math.max(0, growerBase   + addDeliveriesSince("Grower",   latestByType.Grower?.date)   - cons.Grower   * growerDays),
+      Finisher:Math.max(0, finisherBase + addDeliveriesSince("Finisher", latestByType.Finisher?.date) - cons.Finisher * finisherDays),
+    } as Record<FeedType, number>;
+  }, [snapshotsByType, deliveries, typeTotalsFromSilos, consumptionPerType]);
 
   const estimatedTotal = useMemo(
     () => estimatedRemainingByType.Starter + estimatedRemainingByType.Grower + estimatedRemainingByType.Finisher,
@@ -251,36 +281,50 @@ export default function Feed() {
   };
 
   // --------------------
-  // NEW: forms state
+  // NEW: stocktake form (by shed, per-type; no notes)
   // --------------------
-  // Stocktake draft (per type)
   const [stDate, setStDate] = useState<string>(() => toISODate(new Date()));
-  const [stStarter, setStStarter] = useState<string>("");
-  const [stGrower, setStGrower] = useState<string>("");
-  const [stFinisher, setStFinisher] = useState<string>("");
-  const [stNotes, setStNotes] = useState<string>("");
+  const [stFeedType, setStFeedType] = useState<FeedType>("Starter");
+  const [stSheds, setStSheds] = useState<Array<{ id: string; shed: string; tons: string }>>([
+    { id: newId(), shed: "", tons: "" },
+  ]);
+
+  const addStShedRow = () => setStSheds((prev) => [...prev, { id: newId(), shed: "", tons: "" }]);
+  const removeStShedRow = (id: string) => setStSheds((prev) => prev.filter((r) => r.id !== id));
+  const updateStShedRow = (id: string, patch: Partial<{ shed: string; tons: string }>) =>
+    setStSheds((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
   const addStocktake = () => {
-    const starterT = stStarter === "" ? undefined : clampNum(stStarter);
-    const growerT = stGrower === "" ? undefined : clampNum(stGrower);
-    const finisherT = stFinisher === "" ? undefined : clampNum(stFinisher);
-    if (starterT == null && growerT == null && finisherT == null) {
-      alert("Enter at least one feed type amount.");
+    // Clean rows
+    const sheds: ShedEntry[] = stSheds
+      .map((r) => ({ shed: (r.shed || "").trim(), tons: clampNum(r.tons) }))
+      .filter((r) => r.tons > 0);
+
+    if (sheds.length === 0) {
+      alert("Add at least one shed with a positive tonnage.");
       return;
     }
+
+    const totalTons = sheds.reduce((s, r) => s + r.tons, 0);
+
     const st: Stocktake = {
       id: newId(),
       date: stDate,
-      starterT,
-      growerT,
-      finisherT,
-      notes: stNotes || undefined,
+      feedType: stFeedType,
+      totalTons,
+      sheds,
     };
+
     setStocktakes((prev) => [...(prev || []), st]);
-    setStStarter(""); setStGrower(""); setStFinisher(""); setStNotes("");
+    // reset form
+    setStDate(toISODate(new Date()));
+    setStFeedType(stFeedType); // keep current type selected
+    setStSheds([{ id: newId(), shed: "", tons: "" }]);
   };
 
-  // Delivery draft
+  // --------------------
+  // Delivery form (unchanged)
+  // --------------------
   const [dlDate, setDlDate] = useState<string>(() => toISODate(new Date()));
   const [dlType, setDlType] = useState<FeedType>("Starter");
   const [dlTons, setDlTons] = useState<string>("");
@@ -294,14 +338,11 @@ export default function Feed() {
   };
 
   // --------------------
-  // NEW: order planner
+  // Order planner (unchanged)
   // --------------------
-  // Recommend orders for the next N days using derived consumption and thresholds from quotes (or defaults)
   const [horizonDays, setHorizonDays] = useState<number>(28);
 
   const recommendations = useMemo(() => {
-    // Determine threshold per type: use quotes.thresholdPct of quotes.targetT, else 25% of latest stocktake base (or current estimate)
-    const today = toISODate(new Date());
     const thresholds: Record<FeedType, number> = { Starter: 0, Grower: 0, Finisher: 0 };
     const targets: Record<FeedType, number> = { Starter: 0, Grower: 0, Finisher: 0 };
 
@@ -312,13 +353,12 @@ export default function Feed() {
       const q = byTypeQuote[ft];
       const target = clampNum(q?.targetT ?? 0);
       const thresholdPct = clampNum(q?.thresholdPct ?? 25);
-      const base = estimatedRemainingByType[ft]; // conservative: use current estimate as base reference
+      const base = estimatedRemainingByType[ft];
       targets[ft] = target > 0 ? target : Math.max(base, 0);
       thresholds[ft] =
         targets[ft] > 0 ? (targets[ft] * thresholdPct) / 100 : Math.max(0, base * 0.25);
     });
 
-    // Simulate forward daily, subtracting consumption, and top up when crossing threshold
     const plan: PlannedOrder[] = [];
     const state: Record<FeedType, number> = {
       Starter: estimatedRemainingByType.Starter,
@@ -331,7 +371,6 @@ export default function Feed() {
       (["Starter", "Grower", "Finisher"] as FeedType[]).forEach((ft) => {
         state[ft] = Math.max(0, state[ft] - cons[ft]);
         if (state[ft] <= thresholds[ft]) {
-          // Recommend ordering to top back to target
           const need = Math.max(0, targets[ft] - state[ft]);
           if (need > 0.01) {
             const date = toISODate(new Date(Date.now() + d * 24 * 60 * 60 * 1000));
@@ -342,7 +381,7 @@ export default function Feed() {
               tons: +need.toFixed(2),
               reason: "Reorder threshold reached",
             });
-            state[ft] += need; // assume delivery arrives same day for the planner (simple model)
+            state[ft] += need; // assume arrival same day for simple plan
           }
         }
       });
@@ -361,11 +400,43 @@ export default function Feed() {
   };
 
   // --------------------
+  // History (read-only) — normalize both new & old stocktake shapes
+  // --------------------
+  type HistoryRow = { id: string; date: string; feedType: FeedType; total: number; sheds?: ShedEntry[] };
+  const stocktakeHistory: HistoryRow[] = useMemo(() => {
+    const out: HistoryRow[] = [];
+    (stocktakes || []).forEach((st: any) => {
+      if (st && st.feedType && typeof st.totalTons !== "undefined") {
+        // New shape
+        out.push({
+          id: st.id,
+          date: st.date,
+          feedType: st.feedType as FeedType,
+          total: clampNum(st.totalTons),
+          sheds: Array.isArray(st.sheds)
+            ? st.sheds.map((s: any) => ({ shed: String(s?.shed || ""), tons: clampNum(s?.tons) }))
+            : [],
+        });
+      } else if (st && st.date) {
+        // Old shape: expand to 1 row per defined type
+        if (typeof st.starterT !== "undefined")
+          out.push({ id: `${st.id || newId()}-starter`, date: st.date, feedType: "Starter", total: clampNum(st.starterT) });
+        if (typeof st.growerT !== "undefined")
+          out.push({ id: `${st.id || newId()}-grower`,  date: st.date, feedType: "Grower",  total: clampNum(st.growerT) });
+        if (typeof st.finisherT !== "undefined")
+          out.push({ id: `${st.id || newId()}-finisher`,date: st.date, feedType: "Finisher",total: clampNum(st.finisherT) });
+      }
+    });
+    out.sort((a, b) => b.date.localeCompare(a.date)); // newest first
+    return out;
+  }, [stocktakes]);
+
+  // --------------------
   // RENDER
   // --------------------
   return (
     <div className="p-4 space-y-6">
-      {/* ---- TOP TILES (match dashboard style) ---- */}
+      {/* ---- TOP TILES ---- */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="p-4 border rounded-2xl bg-white">
           <div className="text-xs text-slate-500">Estimated Remaining (Total)</div>
@@ -391,7 +462,7 @@ export default function Feed() {
         </div>
       </div>
 
-      {/* ---- EXISTING HEADER ROW ---- */}
+      {/* ---- HEADER ---- */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Feed</h1>
         <div className="text-sm text-slate-600">
@@ -399,9 +470,9 @@ export default function Feed() {
         </div>
       </div>
 
-      {/* ---- NEW: STOCKTAKE FORM ---- */}
+      {/* ---- NEW: STOCKTAKE (by shed, per-type) ---- */}
       <div className="p-4 border rounded-2xl bg-white">
-        <div className="font-medium mb-3">Record feed stocktake</div>
+        <div className="font-medium mb-3">Record feed stocktake (by shed)</div>
         <div className="grid md:grid-cols-6 gap-3">
           <div>
             <label className="block text-sm mb-1">Date</label>
@@ -412,45 +483,62 @@ export default function Feed() {
               onChange={(e) => setStDate(e.target.value)}
             />
           </div>
+            <div>
+              <label className="block text-sm mb-1">Current feed type</label>
+              <select
+                className="w-full border rounded px-2 py-1"
+                value={stFeedType}
+                onChange={(e) => setStFeedType(e.target.value as FeedType)}
+              >
+                {FEED_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+        </div>
+
+        {/* Shed rows */}
+        <div className="mt-4 space-y-2">
+          {stSheds.map((row, idx) => (
+            <div key={row.id} className="grid md:grid-cols-6 gap-3 items-end">
+              <div className="md:col-span-3">
+                <label className="block text-sm mb-1">Shed name</label>
+                <input
+                  className="w-full border rounded px-2 py-1"
+                  placeholder={idx === 0 ? "e.g., Shed 1" : ""}
+                  value={row.shed}
+                  onChange={(e) => updateStShedRow(row.id, { shed: e.target.value })}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm mb-1">Feed in shed (t)</label>
+                <input
+                  type="number" min={0} step="0.01"
+                  className="w-full border rounded px-2 py-1"
+                  placeholder={idx === 0 ? "e.g., 12.5" : ""}
+                  value={row.tons}
+                  onChange={(e) => updateStShedRow(row.id, { tons: e.target.value })}
+                />
+              </div>
+              <div className="md:col-span-1">
+                <button
+                  className="w-full px-3 py-2 border rounded"
+                  onClick={() => removeStShedRow(row.id)}
+                  disabled={stSheds.length === 1}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+
           <div>
-            <label className="block text-sm mb-1">Starter (t)</label>
-            <input
-              type="number" min={0} step="0.01"
-              className="w-full border rounded px-2 py-1"
-              value={stStarter}
-              onChange={(e) => setStStarter(e.target.value)}
-              placeholder="e.g., 12.5"
-            />
-          </div>
-          <div>
-            <label className="block text-sm mb-1">Grower (t)</label>
-            <input
-              type="number" min={0} step="0.01"
-              className="w-full border rounded px-2 py-1"
-              value={stGrower}
-              onChange={(e) => setStGrower(e.target.value)}
-              placeholder="e.g., 22.0"
-            />
-          </div>
-          <div>
-            <label className="block text-sm mb-1">Finisher (t)</label>
-            <input
-              type="number" min={0} step="0.01"
-              className="w-full border rounded px-2 py-1"
-              value={stFinisher}
-              onChange={(e) => setStFinisher(e.target.value)}
-              placeholder="e.g., 30.0"
-            />
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-sm mb-1">Notes</label>
-            <input
-              className="w-full border rounded px-2 py-1"
-              value={stNotes}
-              onChange={(e) => setStNotes(e.target.value)}
-            />
+            <button className="mt-2 px-4 py-2 border rounded" onClick={addStShedRow}>
+              + Add another shed
+            </button>
           </div>
         </div>
+
         <div className="mt-3">
           <button className="px-4 py-2 rounded bg-black text-white" onClick={addStocktake}>
             Save stocktake
@@ -458,7 +546,46 @@ export default function Feed() {
         </div>
       </div>
 
-      {/* ---- NEW: DELIVERY FORM ---- */}
+      {/* ---- NEW: STOCKTAKE HISTORY (read-only) ---- */}
+      <div className="p-4 border rounded-2xl bg-white">
+        <div className="font-medium mb-3">Stocktake history</div>
+        {stocktakeHistory.length === 0 ? (
+          <div className="text-sm text-slate-600">No stocktakes recorded yet.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="py-2 pr-2">Date</th>
+                  <th className="py-2 pr-2">Feed type</th>
+                  <th className="py-2 pr-2">Total (t)</th>
+                  <th className="py-2 pr-2">Per-shed breakdown</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stocktakeHistory.map((r) => (
+                  <tr key={r.id} className="border-b align-top">
+                    <td className="py-2 pr-2">{r.date}</td>
+                    <td className="py-2 pr-2">{r.feedType}</td>
+                    <td className="py-2 pr-2">{r.total.toFixed(2)}</td>
+                    <td className="py-2 pr-2">
+                      {r.sheds && r.sheds.length > 0
+                        ? r.sheds
+                            .map((s) =>
+                              `${s.shed || "Shed"}: ${Number(s.tons).toFixed(2)} t`
+                            )
+                            .join(", ")
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ---- DELIVERY FORM (unchanged) ---- */}
       <div className="p-4 border rounded-2xl bg-white">
         <div className="font-medium mb-3">Add feed delivery</div>
         <div className="grid md:grid-cols-6 gap-3">
@@ -501,7 +628,7 @@ export default function Feed() {
         </div>
       </div>
 
-      {/* ---- NEW: ORDER PLANNER ---- */}
+      {/* ---- ORDER PLANNER (unchanged) ---- */}
       <div className="p-4 border rounded-2xl bg-white">
         <div className="flex items-center justify-between mb-3">
           <div className="font-medium">Recommended order plan</div>
@@ -556,7 +683,7 @@ export default function Feed() {
         </div>
       </div>
 
-      {/* ---- EXISTING: ADD SILO FORM (unchanged) ---- */}
+      {/* ---- ADD SILO (unchanged) ---- */}
       <div className="p-4 border rounded-2xl bg-white">
         <div className="font-medium mb-3">Add silo</div>
         <div className="grid md:grid-cols-6 gap-3">
@@ -620,7 +747,7 @@ export default function Feed() {
         </div>
       </div>
 
-      {/* ---- EXISTING: SILOS TABLE (unchanged) ---- */}
+      {/* ---- SILOS TABLE (unchanged) ---- */}
       <div className="p-4 border rounded-2xl bg-white">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
