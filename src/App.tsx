@@ -139,10 +139,10 @@ function MobileDrawer({ open, onClose }: { open: boolean; onClose: () => void })
   const links = [
     { to: "/", label: "Dashboard" },
     { to: "/morts", label: "Morts" },
-    { to: "/pickups", label: "Pickups" },
     { to: "/weights", label: "Weights" },
     { to: "/feed", label: "Feed" },
     { to: "/water", label: "Water" },
+    { to: "/pickups", label: "Pickups" },
     { to: "/reminders", label: "Reminders" },
     { to: "/setup", label: "Setup" },
     { to: "/Farms", label: "Farms" },
@@ -196,10 +196,10 @@ export default function App() {
             <nav className="hidden md:flex items-center gap-1 text-sm">
               <NavItem to="/">Dashboard</NavItem>
               <NavItem to="/morts">Morts</NavItem>
-              <NavItem to="/pickups">Pickups</NavItem>
               <NavItem to="/weights">Weights</NavItem>
               <NavItem to="/feed">Feed</NavItem>
               <NavItem to="/water">Water</NavItem>
+              <NavItem to="/pickups">Pickups</NavItem>
               <NavItem to="/reminders">Reminders</NavItem>
               <NavItem to="/setup">Setup</NavItem>
               <NavItem to="/Farms">Farms</NavItem>
