@@ -1,4 +1,5 @@
 import { Handler } from "@netlify/functions";
+import { get, set } from "@netlify/blobs";
 
 interface Farm {
   id: string;
@@ -6,8 +7,7 @@ interface Farm {
   [key: string]: any;
 }
 
-// Temporary in-memory storage
-let farms: Farm[] = [];
+const FARMS_KEY = "farms_list";
 
 const handler: Handler = async (event) => {
   const headers = {
@@ -16,9 +16,15 @@ const handler: Handler = async (event) => {
     "Access-Control-Allow-Headers": "Content-Type",
   };
 
-  // Handle preflight
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 200, headers, body: "" };
+  }
+
+  // Load farms list
+  let farms: Farm[] = [];
+  const stored = await get(FARMS_KEY);
+  if (stored) {
+    farms = await stored.json();
   }
 
   // GET farms
@@ -28,31 +34,25 @@ const handler: Handler = async (event) => {
 
   // CREATE farm
   if (event.httpMethod === "POST") {
-    try {
-      const body = JSON.parse(event.body || "{}");
-      if (!body.name) {
-        return { statusCode: 400, headers, body: "Farm must have a name" };
-      }
-      const newFarm: Farm = { id: Date.now().toString(), ...body };
-      farms.push(newFarm);
-      return { statusCode: 200, headers, body: JSON.stringify(newFarm) };
-    } catch {
-      return { statusCode: 400, headers, body: "Invalid farm data" };
+    const body = JSON.parse(event.body || "{}");
+    if (!body.name) {
+      return { statusCode: 400, headers, body: "Farm must have a name" };
     }
+    const newFarm: Farm = { id: Date.now().toString(), ...body };
+    farms.push(newFarm);
+    await set(FARMS_KEY, JSON.stringify(farms));
+    return { statusCode: 200, headers, body: JSON.stringify(newFarm) };
   }
 
   // DELETE farm
   if (event.httpMethod === "DELETE") {
-    try {
-      const body = JSON.parse(event.body || "{}");
-      if (!body.id) {
-        return { statusCode: 400, headers, body: "Farm id required" };
-      }
-      farms = farms.filter((f) => f.id !== body.id);
-      return { statusCode: 200, headers, body: JSON.stringify({ ok: true }) };
-    } catch {
-      return { statusCode: 400, headers, body: "Invalid request" };
+    const body = JSON.parse(event.body || "{}");
+    if (!body.id) {
+      return { statusCode: 400, headers, body: "Farm id required" };
     }
+    farms = farms.filter((f) => f.id !== body.id);
+    await set(FARMS_KEY, JSON.stringify(farms));
+    return { statusCode: 200, headers, body: JSON.stringify({ ok: true }) };
   }
 
   return { statusCode: 405, headers, body: "Method Not Allowed" };
