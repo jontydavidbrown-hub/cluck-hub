@@ -98,7 +98,7 @@ export default function Setup() {
               type="number"
               min={1}
               className="w-full border rounded px-3 py-2 placeholder-transparent"
-              placeholder="e.g. 42"
+              placeholder="e.g. 51"
               value={
                 typeof settings.batchLengthDays === "number" && settings.batchLengthDays > 0
                   ? settings.batchLengthDays
