@@ -6,11 +6,10 @@ interface Farm {
   name: string;
 }
 
-const STORE_NAME = "app-data";         // name of your site-wide store (any string w/o "/" or ":")
-const FARMS_KEY  = "farms_list";       // key inside the store
+const STORE_NAME = "app-data";      // any simple string
+const FARMS_KEY  = "farms_list";
 
-// Keys that may exist if the user added data before farms existed.
-// Adjust this list to match your app.
+// Adjust to your actual datasets that might exist pre-farm
 const ORPHAN_KEYS = [
   "morts",
   "feed",
@@ -27,10 +26,20 @@ const headers = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-// dynamic import to avoid ESM/CJS crash
+// Dynamic import to avoid ESM/CJS issues
 async function getStoreApi() {
-  const { getStore } = await import("@netlify/blobs");
-  return getStore(STORE_NAME);
+  const mod = await import("@netlify/blobs");
+  const siteID = process.env.NETLIFY_SITE_ID;
+  const token  = process.env.NETLIFY_AUTH_TOKEN;
+
+  if (!siteID || !token) {
+    throw new Error(
+      "Blobs not configured. Please set NETLIFY_SITE_ID and NETLIFY_AUTH_TOKEN as environment variables."
+    );
+  }
+
+  // getStore(name, options)
+  return mod.getStore(STORE_NAME, { siteID, token });
 }
 
 function makeId() {
@@ -51,16 +60,15 @@ async function saveFarms(farms: Farm[]) {
 
 async function migrateOrphansToFarm(farmId: string) {
   const store = await getStoreApi();
-
   for (const key of ORPHAN_KEYS) {
     const fromKey = `data/${key}`;
     try {
       const value = await store.get(fromKey, { type: "json" });
-      if (value == null) continue; // nothing to migrate
+      if (value == null) continue;
       const toKey = `farm/${farmId}/${key}`;
       await store.setJSON(toKey, value);
     } catch {
-      // skip individual failures; don’t block creation
+      // Skip individual failures; don't block farm creation
     }
   }
 }
@@ -73,12 +81,10 @@ export const handler: Handler = async (event) => {
   try {
     let farms = await loadFarms();
 
-    // GET: list farms
     if (event.httpMethod === "GET") {
       return { statusCode: 200, headers, body: JSON.stringify(farms) };
     }
 
-    // POST: create farm (and if it's the first, migrate orphaned data into it)
     if (event.httpMethod === "POST") {
       const body = JSON.parse(event.body || "{}");
       const name = String(body?.name ?? "").trim();
@@ -99,7 +105,6 @@ export const handler: Handler = async (event) => {
       return { statusCode: 200, headers, body: JSON.stringify(newFarm) };
     }
 
-    // DELETE: remove farm
     if (event.httpMethod === "DELETE") {
       const body = JSON.parse(event.body || "{}");
       const id = String(body?.id ?? "").trim();
