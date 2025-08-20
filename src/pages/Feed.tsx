@@ -203,7 +203,7 @@ export default function Feed() {
   }
 
   // Sort + expand/collapse for Deliveries
-  const [deliveriesOpen, setDeliveriesOpen] = useState(true);
+  const [deliveriesOpen, setDeliveriesOpen] = useState(false);
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
 
   const deliveryRows = useMemo(() => {
