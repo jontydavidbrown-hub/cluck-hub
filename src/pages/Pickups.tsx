@@ -22,12 +22,14 @@ const uuid = () =>
     ? crypto.randomUUID()
     : String(Math.random()).slice(2));
 
-function dayAgeFrom(placement?: string): number {
-  if (!placement) return 0;
+/** Day age on a specific date (1-based). If no date provided, uses today. */
+function dayAgeOn(placement?: string, onDate?: string): number | null {
+  if (!placement) return null;
   const start = new Date(placement + "T00:00:00");
-  const today = new Date();
-  const diff = Math.floor((+today - +start) / 86400000);
-  return Math.max(0, diff + 1); // 1-based day age
+  const at = onDate ? new Date(onDate + "T00:00:00") : new Date();
+  if (isNaN(+start) || isNaN(+at)) return null;
+  const diff = Math.floor((+at - +start) / 86400000);
+  return Math.max(0, diff + 1);
 }
 
 export default function Pickups() {
@@ -115,7 +117,8 @@ export default function Pickups() {
         </div>
         {selectedShed && (
           <p className="mt-2 text-center text-xs text-slate-500">
-            Day age: <b>{dayAgeFrom(selectedShed.placementDate)}</b>
+            Day age on <b>{date}</b>:{" "}
+            <b>{dayAgeOn(selectedShed.placementDate, date) ?? "—"}</b>
           </p>
         )}
       </div>
@@ -172,9 +175,10 @@ export default function Pickups() {
             <tbody>
               {sorted.map((r) => {
                 const shed = shedsSorted.find((s) => s.id === r.shedId);
-                const dayAge = dayAgeFrom(shed?.placementDate);
-                const shedName = shed?.name || `Shed ${String(r.shedId).slice(0, 4)}`;
                 const isEdit = editingId === r.id;
+                const dateForAge = isEdit ? editDate : r.date;
+                const dayAge = dayAgeOn(shed?.placementDate, dateForAge);
+                const shedName = shed?.name || `Shed ${String(r.shedId).slice(0, 4)}`;
                 return (
                   <tr key={r.id} className="border-b">
                     <td className="py-2 pr-2">
@@ -189,7 +193,7 @@ export default function Pickups() {
                         r.date
                       )}
                     </td>
-                    <td className="py-2 pr-2">{dayAge}</td>
+                    <td className="py-2 pr-2">{dayAge ?? "—"}</td>
                     <td className="py-2 pr-2">{shedName}</td>
                     <td className="py-2 pr-2">
                       {isEdit ? (
