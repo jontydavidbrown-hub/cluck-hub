@@ -203,7 +203,6 @@ export default function Setup() {
 
         <p className="mt-2 text-xs text-slate-500">
           Enter the planned number of <strong>24t loads</strong> for each feed type. Set <strong>Booster</strong> to <strong>0</strong> if it’s unlimited/as needed.  
-          Types set to <strong>0</strong> will be hidden from the Feed page quota tiles.
         </p>
       </div>
     </div>
