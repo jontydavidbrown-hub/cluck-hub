@@ -27,9 +27,28 @@ type MortsRow = {
   cullOther?: number;
 };
 
-const T_PER_KG = 0.001;
+// Feed: deliveries + stocktakes
+type FeedType = "starter" | "grower" | "finisher" | "booster";
+type Delivery = {
+  id: string;
+  date: string;     // YYYY-MM-DD
+  type: FeedType;
+  tonnes?: number;
+  loads?: number;   // legacy
+  shedId?: string;
+};
+type Stocktake = {
+  id: string;
+  shedId: string;
+  tonnes: number;
+  dateTime?: string; // ISO
+  date?: string;     // legacy YYYY-MM-DD
+};
 
-// Approx daily feed per bird (grams) by age; coarse curve with piecewise linear fill
+const T_PER_KG = 0.001;
+const LOAD_TONNES = 24;
+
+// Approx daily feed per bird (grams) by age; piecewise linear
 function feedPerBirdG(age: number): number {
   const pts = [
     [1, 15], [7, 28], [14, 50], [21, 80], [28, 110], [35, 130], [42, 150],
@@ -43,7 +62,6 @@ function feedPerBirdG(age: number): number {
       return g1 + t * (g2 - g1);
     }
   }
-  // Flat after last point
   return pts[pts.length - 1][1];
 }
 
@@ -54,25 +72,43 @@ function daysSince(iso?: string): number {
   const diff = Math.floor((+d1 - +d0) / 86400000);
   return Math.max(0, diff);
 }
-
 function num(v: any): number { return Number.isFinite(Number(v)) ? Number(v) : 0; }
+function parseISOish(s?: string): Date | null {
+  if (!s) return null;
+  const d = new Date(s);
+  return isNaN(+d) ? null : d;
+}
+function parseYMD(s?: string): Date | null {
+  if (!s) return null;
+  const d = new Date(s + "T00:00:00");
+  return isNaN(+d) ? null : d;
+}
+function deliveryTonnes(d: Delivery): number {
+  if (typeof d.tonnes === "number" && Number.isFinite(d.tonnes)) return Math.max(0, d.tonnes);
+  const loads = Number(d.loads) || 0;
+  return Math.max(0, loads * LOAD_TONNES);
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
 
   const [settings] = useCloudSlice<Settings>("settings", { batchLengthDays: 42 });
   const [sheds] = useCloudSlice<Shed[]>("sheds", []);
-  // Read from both possible keys and merge (supports your older Daily Log and newer Morts page)
+  // morts can be stored in either key; merge
   const [mortsA] = useCloudSlice<MortsRow[]>("morts", []);
   const [mortsB] = useCloudSlice<MortsRow[]>("dailyLog", []);
   const mortsRows = useMemo(() => [...(mortsA || []), ...(mortsB || [])], [mortsA, mortsB]);
+
+  // feed slices for silo estimation
+  const [deliveries] = useCloudSlice<Delivery[]>("feedDeliveries", []);
+  const [stocktakes] = useCloudSlice<Stocktake[]>("feedStocktakes", []);
 
   const shedsSorted = useMemo(
     () => [...(sheds || [])].sort((a, b) => (a?.name || "").localeCompare(b?.name || "")),
     [sheds]
   );
 
-  // Map shed -> totals
+  // Map shed -> base stats + daily consumption estimate
   const perShed = useMemo(() => {
     const map = new Map<string, {
       shed: Shed;
@@ -81,12 +117,11 @@ export default function Dashboard() {
       morts: number;
       culls: number;
       remaining: number;
-      estFeedTonnes: number; // per day
+      estFeedTonnesPerDay: number;
     }>();
     for (const s of shedsSorted) {
       const birdsPlaced = num(s.birdsPlaced ?? s.placementBirds);
       const age = daysSince(s.placementDate) + 1; // day age (1-based)
-      // sum morts & culls for this shed
       let morts = 0, culls = 0;
       for (const r of mortsRows) {
         const isThis =
@@ -99,10 +134,10 @@ export default function Dashboard() {
           num(r.cullRunts) + num(r.cullLegs) + num(r.cullNonStart) + num(r.cullOther);
         culls += cullSum;
       }
-      const remaining = Math.max(0, birdsPlaced - morts - culls);
+      const remainingBirds = Math.max(0, birdsPlaced - morts - culls);
       const gPerBird = feedPerBirdG(age);
-      const estFeedTonnes = remaining * gPerBird * T_PER_KG / 1000; // g -> kg -> t
-      map.set(s.id, { shed: s, age, birdsPlaced, morts, culls, remaining, estFeedTonnes });
+      const estFeedTonnesPerDay = remainingBirds * gPerBird * T_PER_KG / 1000; // g -> kg -> t
+      map.set(s.id, { shed: s, age, birdsPlaced, morts, culls, remaining: remainingBirds, estFeedTonnesPerDay });
     }
     return map;
   }, [shedsSorted, mortsRows]);
@@ -114,12 +149,92 @@ export default function Dashboard() {
       remaining += v.remaining;
       allMorts += v.morts;
       allCulls += v.culls;
-      estFeedT += v.estFeedTonnes;
+      estFeedT += v.estFeedTonnesPerDay;
     }
     return { placed, remaining, allMorts, allCulls, estFeedT };
   }, [perShed]);
 
   const batchLen = Math.max(1, num(settings.batchLengthDays || 42));
+
+  // ---- Silo estimates per shed (remaining t + % of "high-water" since last stocktake) ----
+  const siloTiles = useMemo(() => {
+    // latest stocktake by shed
+    const latestST = new Map<string, Stocktake>();
+    for (const st of stocktakes || []) {
+      if (!st.shedId) continue;
+      const key = st.shedId;
+      const prev = latestST.get(key);
+      const a = parseISOish(st.dateTime) || parseYMD(st.date);
+      const b = prev ? (parseISOish(prev.dateTime) || parseYMD(prev.date)) : null;
+      if (!b || (a && +a > +b)) latestST.set(key, st);
+    }
+
+    // group deliveries by shed and sort by date
+    const byShed = new Map<string, Delivery[]>();
+    for (const d of deliveries || []) {
+      const k = d.shedId || "";
+      if (!byShed.has(k)) byShed.set(k, []);
+      byShed.get(k)!.push(d);
+    }
+    for (const arr of byShed.values()) {
+      arr.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    }
+
+    const rows: {
+      shed: Shed;
+      remainingT?: number;
+      percent?: number;
+      highWater?: number;
+    }[] = [];
+
+    const now = new Date();
+
+    for (const s of shedsSorted) {
+      const v = perShed.get(s.id);
+      if (!v) continue;
+
+      const st = latestST.get(s.id);
+      const deliveriesFor = byShed.get(s.id) || [];
+      let baseT = 0;
+      let baseTime: Date | null = null;
+      let deliveredSince = 0;
+
+      if (st) {
+        baseT = num(st.tonnes);
+        baseTime = parseISOish(st.dateTime) || parseYMD(st.date);
+        // deliveries on/after stocktake date
+        const stDateStr = baseTime ? baseTime.toISOString().slice(0, 10) : undefined;
+        for (const d of deliveriesFor) {
+          if (!stDateStr || (d.date || "") >= stDateStr) {
+            deliveredSince += deliveryTonnes(d);
+          }
+        }
+      } else {
+        // No stocktake: base is 0; all deliveries count, consumption since first delivery
+        for (const d of deliveriesFor) deliveredSince += deliveryTonnes(d);
+        // set baseTime to first delivery date (if any) for consumption calc
+        if (deliveriesFor.length > 0) baseTime = parseYMD(deliveriesFor[0].date);
+      }
+
+      // consumption since baseTime (if we have a point to anchor from)
+      let days = 0;
+      if (baseTime) {
+        days = Math.max(0, Math.floor((+now - +baseTime) / 86400000));
+      }
+      const consumptionSince = (v.estFeedTonnesPerDay || 0) * days;
+
+      const estRemaining = Math.max(0, baseT + deliveredSince - consumptionSince);
+
+      // high-water: estimate "capacity" since base point
+      const highWater = st ? (baseT + deliveredSince) : deliveredSince;
+      const pct = highWater > 0 ? Math.max(0, Math.min(100, Math.round((estRemaining / highWater) * 100))) : undefined;
+
+      rows.push({ shed: s, remainingT: estRemaining, percent: pct, highWater });
+    }
+
+    // limit to 4 tiles, stable order (already sorted by name)
+    return rows.slice(0, 4);
+  }, [stocktakes, deliveries, shedsSorted, perShed]);
 
   function goAddWeights(s: Shed) {
     const qs = new URLSearchParams();
@@ -149,7 +264,6 @@ export default function Dashboard() {
           <div className="text-xl font-semibold mt-1">{totals.remaining.toLocaleString()}</div>
         </div>
         <div className="rounded border p-4 bg-white">
-          {/* >>> label changed here <<< */}
           <div className="text-xs text-slate-500">Morts / Culls</div>
           <div className="text-xl font-semibold mt-1">
             {totals.allMorts.toLocaleString()}/{totals.allCulls.toLocaleString()}
@@ -162,6 +276,37 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* NEW: Silo feed remaining tiles (up to 4) */}
+      {siloTiles.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {siloTiles.map(({ shed, remainingT, percent }) => {
+            const pct = percent ?? 0;
+            const pctLabel = percent != null ? `${pct}%` : "N/A";
+            const tLabel =
+              remainingT != null
+                ? `${remainingT.toLocaleString(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 })} t`
+                : "—";
+            return (
+              <div key={shed.id} className="rounded border p-4 bg-white">
+                <div className="text-xs text-slate-500 truncate">
+                  {shed.name || `Shed ${String(shed.id).slice(0, 4)}`} — Feed Remaining
+                </div>
+                <div className="mt-1 flex items-baseline justify-between">
+                  <div className="text-xl font-semibold">{pctLabel}</div>
+                  <div className="text-xs text-slate-500">{tLabel}</div>
+                </div>
+                <div className="mt-2 h-2 rounded bg-slate-100 overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-emerald-400 to-lime-500 transition-[width] duration-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Per-shed tiles */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -192,7 +337,6 @@ export default function Dashboard() {
                   <div className="text-sm font-medium">{v.birdsPlaced.toLocaleString()}</div>
                 </div>
                 <div className="rounded border p-2">
-                  {/* >>> label changed here <<< */}
                   <div className="text-[11px] text-slate-500">Morts / Culls</div>
                   <div className="text-sm font-medium">
                     {v.morts.toLocaleString()}/{v.culls.toLocaleString()}
@@ -201,7 +345,7 @@ export default function Dashboard() {
                 <div className="rounded border p-2">
                   <div className="text-[11px] text-slate-500">Est Feed (t/day)</div>
                   <div className="text-sm font-medium">
-                    {v.estFeedTonnes.toLocaleString(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 })}
+                    {v.estFeedTonnesPerDay.toLocaleString(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 })}
                   </div>
                 </div>
               </div>
