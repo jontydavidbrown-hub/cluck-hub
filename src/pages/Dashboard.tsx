@@ -45,6 +45,8 @@ type Stocktake = {
   date?: string;     // legacy YYYY-MM-DD
 };
 
+type SiloCaps = Record<string, number>; // shedId -> capacity tonnes
+
 const T_PER_KG = 0.001;
 const LOAD_TONNES = 24;
 
@@ -102,6 +104,7 @@ export default function Dashboard() {
   // feed slices for silo estimation
   const [deliveries] = useCloudSlice<Delivery[]>("feedDeliveries", []);
   const [stocktakes] = useCloudSlice<Stocktake[]>("feedStocktakes", []);
+  const [siloCaps] = useCloudSlice<SiloCaps>("siloCapacities", {}); // NEW
 
   const shedsSorted = useMemo(
     () => [...(sheds || [])].sort((a, b) => (a?.name || "").localeCompare(b?.name || "")),
@@ -156,7 +159,7 @@ export default function Dashboard() {
 
   const batchLen = Math.max(1, num(settings.batchLengthDays || 42));
 
-  // ---- Silo estimates per shed (remaining t + % of "high-water" since last stocktake) ----
+  // ---- Silo estimates per shed (remaining t + % of capacity) ----
   const siloTiles = useMemo(() => {
     // latest stocktake by shed
     const latestST = new Map<string, Stocktake>();
@@ -184,7 +187,7 @@ export default function Dashboard() {
       shed: Shed;
       remainingT?: number;
       percent?: number;
-      highWater?: number;
+      capacityT?: number;
     }[] = [];
 
     const now = new Date();
@@ -193,6 +196,7 @@ export default function Dashboard() {
       const v = perShed.get(s.id);
       if (!v) continue;
 
+      const capT = num((siloCaps || {})[s.id]); // capacity in tonnes (0 means unknown)
       const st = latestST.get(s.id);
       const deliveriesFor = byShed.get(s.id) || [];
       let baseT = 0;
@@ -202,7 +206,6 @@ export default function Dashboard() {
       if (st) {
         baseT = num(st.tonnes);
         baseTime = parseISOish(st.dateTime) || parseYMD(st.date);
-        // deliveries on/after stocktake date
         const stDateStr = baseTime ? baseTime.toISOString().slice(0, 10) : undefined;
         for (const d of deliveriesFor) {
           if (!stDateStr || (d.date || "") >= stDateStr) {
@@ -210,31 +213,25 @@ export default function Dashboard() {
           }
         }
       } else {
-        // No stocktake: base is 0; all deliveries count, consumption since first delivery
         for (const d of deliveriesFor) deliveredSince += deliveryTonnes(d);
-        // set baseTime to first delivery date (if any) for consumption calc
         if (deliveriesFor.length > 0) baseTime = parseYMD(deliveriesFor[0].date);
       }
 
-      // consumption since baseTime (if we have a point to anchor from)
       let days = 0;
-      if (baseTime) {
-        days = Math.max(0, Math.floor((+now - +baseTime) / 86400000));
-      }
+      if (baseTime) days = Math.max(0, Math.floor((+now - +baseTime) / 86400000));
       const consumptionSince = (v.estFeedTonnesPerDay || 0) * days;
 
       const estRemaining = Math.max(0, baseT + deliveredSince - consumptionSince);
 
-      // high-water: estimate "capacity" since base point
-      const highWater = st ? (baseT + deliveredSince) : deliveredSince;
-      const pct = highWater > 0 ? Math.max(0, Math.min(100, Math.round((estRemaining / highWater) * 100))) : undefined;
+      // % of capacity (if provided)
+      const pct = capT > 0 ? Math.max(0, Math.min(100, Math.round((estRemaining / capT) * 100))) : undefined;
 
-      rows.push({ shed: s, remainingT: estRemaining, percent: pct, highWater });
+      rows.push({ shed: s, remainingT: estRemaining, percent: pct, capacityT: capT || undefined });
     }
 
     // limit to 4 tiles, stable order (already sorted by name)
     return rows.slice(0, 4);
-  }, [stocktakes, deliveries, shedsSorted, perShed]);
+  }, [stocktakes, deliveries, shedsSorted, perShed, siloCaps]);
 
   function goAddWeights(s: Shed) {
     const qs = new URLSearchParams();
@@ -277,20 +274,22 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* NEW: Silo feed remaining tiles (up to 4) */}
+      {/* Silo feed remaining tiles (up to 4) — now based on CAPACITY */}
       {siloTiles.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {siloTiles.map(({ shed, remainingT, percent }) => {
+          {siloTiles.map(({ shed, remainingT, percent, capacityT }) => {
             const pct = percent ?? 0;
-            const pctLabel = percent != null ? `${pct}%` : "N/A";
+            const pctLabel = percent != null ? `${pct}%` : "Set capacity in Setup";
             const tLabel =
               remainingT != null
-                ? `${remainingT.toLocaleString(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 })} t`
+                ? capacityT
+                  ? `${remainingT.toLocaleString(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 })} t / ${capacityT.toLocaleString(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 })} t`
+                  : `${remainingT.toLocaleString(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 })} t`
                 : "—";
             return (
               <div key={shed.id} className="rounded border p-4 bg-white">
                 <div className="text-xs text-slate-500 truncate">
-                  {shed.name || `Shed ${String(shed.id).slice(0, 4)}`} — Feed Remaining
+                  {shed.name || `Shed ${String(shed.id).slice(0, 4)}`} — Silo Remaining
                 </div>
                 <div className="mt-1 flex items-baseline justify-between">
                   <div className="text-xl font-semibold">{pctLabel}</div>
@@ -299,7 +298,7 @@ export default function Dashboard() {
                 <div className="mt-2 h-2 rounded bg-slate-100 overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-emerald-400 to-lime-500 transition-[width] duration-500"
-                    style={{ width: `${pct}%` }}
+                    style={{ width: `${percent != null ? pct : 0}%` }}
                   />
                 </div>
               </div>
