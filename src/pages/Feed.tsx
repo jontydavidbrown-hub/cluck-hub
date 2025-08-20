@@ -67,7 +67,7 @@ export default function Feed() {
 
   const q = normalizeQuotas(feedQuotas);
 
-  // ----- Tiles: show delivered totals; underneath show remaining vs quota (green ≤10t, red if <0) -----
+  // ----- Tiles: delivered total; underneath remaining vs quota (green ≤10t, red if <0) -----
   const deliveredTonnesByType = useMemo(() => {
     const sums: Record<FeedType, number> = { starter: 0, grower: 0, finisher: 0, booster: 0 };
     for (const d of deliveries || []) {
@@ -100,7 +100,7 @@ export default function Feed() {
     return "text-slate-500";
   }
 
-  // ----- Stocktake (unchanged layout; separate card) -----
+  // ----- Stocktake (centered, compact controls) -----
   const shedsSorted = useMemo(
     () => [...(sheds || [])].sort((a, b) => (a?.name || "").localeCompare(b?.name || "")),
     [sheds]
@@ -135,7 +135,7 @@ export default function Feed() {
     return list;
   }, [stocktakes]);
 
-  // ----- Add Delivery (exact tonnes + Shed + Booster option) -----
+  // ----- Add Delivery (centered, compact controls) -----
   const [draftDate, setDraftDate] = useState<string>(todayStr());
   const [draftType, setDraftType] = useState<FeedType>("starter");
   const [draftTonnes, setDraftTonnes] = useState<number | "">("");
@@ -234,7 +234,7 @@ export default function Feed() {
         ))}
       </div>
 
-      {/* Stocktake (separate card) */}
+      {/* Stocktake (separate card; compact & centered) */}
       <div className="p-4 border rounded-2xl bg-white">
         <div className="font-medium mb-3">Feed Stocktake</div>
         {(shedsSorted || []).length === 0 ? (
@@ -242,14 +242,11 @@ export default function Feed() {
             No sheds yet. Add sheds in <span className="font-medium">Setup</span>.
           </div>
         ) : (
-          <form
-            className="grid md:grid-cols-6 gap-3 items-end"
-            onSubmit={(e) => { e.preventDefault(); addStocktake(); }}
-          >
-            <label className="block md:col-span-4">
+          <form className="form-center" onSubmit={(e) => { e.preventDefault(); addStocktake(); }}>
+            <label className="block">
               <div className="text-sm mb-1">Shed</div>
               <select
-                className="w-full border rounded px-3 py-2 bg-white"
+                className="border rounded px-3 py-2 bg-white control-md"
                 value={stShedId || firstShedId}
                 onChange={(e) => setStShedId(e.target.value)}
               >
@@ -261,13 +258,13 @@ export default function Feed() {
               </select>
             </label>
 
-            <label className="block md:col-span-2">
+            <label className="block">
               <div className="text-sm mb-1">Tonnes</div>
               <input
                 type="number"
                 step="0.1"
                 min={0}
-                className="w-full border rounded px-3 py-2 placeholder-transparent"
+                className="border rounded px-3 py-2 placeholder-transparent control-sm"
                 placeholder="e.g. 23.4"
                 value={stTonnes === "" ? "" : stTonnes}
                 onChange={(e) => {
@@ -278,22 +275,23 @@ export default function Feed() {
               />
             </label>
 
-            <div className="md:col-span-6">
+            <div className="block">
+              <div className="invisible text-sm mb-1">Save</div>
               <button type="submit" className="rounded bg-slate-900 text-white px-4 py-2">Save</button>
             </div>
           </form>
         )}
       </div>
 
-      {/* Add Delivery (separate card) */}
+      {/* Add Delivery (separate card; compact & centered) */}
       <div className="p-4 border rounded-2xl bg-white">
         <div className="font-medium mb-3">Add Delivery</div>
-        <div className="grid md:grid-cols-8 gap-3 items-end">
+        <div className="form-center">
           <label className="block">
             <div className="text-sm mb-1">Date</div>
             <input
               type="date"
-              className="w-full border rounded px-3 py-2 placeholder-transparent"
+              className="border rounded px-3 py-2 placeholder-transparent control-md"
               value={draftDate}
               onChange={(e) => setDraftDate(e.target.value)}
             />
@@ -302,7 +300,7 @@ export default function Feed() {
           <label className="block">
             <div className="text-sm mb-1">Feed Type</div>
             <select
-              className="w-full border rounded px-3 py-2 bg-white"
+              className="border rounded px-3 py-2 bg-white control-md"
               value={draftType}
               onChange={(e) => setDraftType(e.target.value as FeedType)}
             >
@@ -317,7 +315,7 @@ export default function Feed() {
             <div className="text-sm mb-1">Shed</div>
             {shedsSorted.length > 0 ? (
               <select
-                className="w-full border rounded px-3 py-2 bg-white"
+                className="border rounded px-3 py-2 bg-white control-md"
                 value={draftShedId || firstShedId}
                 onChange={(e) => setDraftShedId(e.target.value)}
               >
@@ -328,7 +326,7 @@ export default function Feed() {
                 ))}
               </select>
             ) : (
-              <input className="w-full border rounded px-3 py-2 bg-white text-slate-500" value={"No sheds — add in Setup"} readOnly />
+              <input className="border rounded px-3 py-2 bg-white text-slate-500 control-md" value={"No sheds — add in Setup"} readOnly />
             )}
           </label>
 
@@ -338,7 +336,7 @@ export default function Feed() {
               type="number"
               step="0.1"
               min={0}
-              className="w-full border rounded px-3 py-2 placeholder-transparent"
+              className="border rounded px-3 py-2 placeholder-transparent control-sm"
               placeholder="e.g. 23.4"
               value={draftTonnes === "" ? "" : draftTonnes}
               onChange={(e) => {
@@ -349,13 +347,14 @@ export default function Feed() {
             />
           </label>
 
-          <div className="md:col-span-4">
+          <div className="block">
+            <div className="invisible text-sm mb-1">Add</div>
             <button className="rounded bg-slate-900 text-white px-4 py-2" onClick={addDelivery}>
               Add
             </button>
           </div>
         </div>
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-slate-500 text-center">
           Quota remaining updates automatically. One load equals <strong>{LOAD_TONNES} tonnes</strong>.
         </p>
       </div>
@@ -373,11 +372,7 @@ export default function Feed() {
             <span>Deliveries</span>
           </div>
 
-          {/* Sort control (don't toggle when clicked) */}
-          <div
-            className="flex items-center gap-2 text-sm"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="flex items-center gap-2 text-sm" onClick={(e) => e.stopPropagation()}>
             <label className="text-slate-600">Sort:</label>
             <select
               className="border rounded px-2 py-1 bg-white"
