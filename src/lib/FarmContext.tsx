@@ -1,159 +1,164 @@
-import React, {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  useCallback,
-} from "react";
+// src/lib/FarmContext.tsx
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { dataGet, dataSet } from "./storage";
 
-type Farm = { id: string; name: string };
+type Farm = { id: string; name: string; role?: "owner" | "member" };
 
-interface FarmContextType {
+type FarmContextType = {
   farms: Farm[];
   farmId: string | null;
-  setFarmId: (id: string) => void;
+  setFarmId: (id: string | null) => void;
   createFarm: (name: string) => Promise<void>;
   deleteFarm: (id: string) => Promise<void>;
+  email: string | null;
   loading: boolean;
   error: string | null;
-}
+};
 
 const FarmContext = createContext<FarmContextType | undefined>(undefined);
 
-// Keys that might have been written before any farm existed.
-// Adjust if your app uses different buckets.
-const ORPHAN_KEYS = [
-  "morts",
-  "feed",
-  "water",
-  "weights",
-  "dailyLogs",
-  "pickups",
-  "reminders",
-];
-
-const FARMS_KEY = "farms_list";
-
-// Helpers for calling your existing /data function
-function buildURL(key: string) {
-  return `/.netlify/functions/data?key=${encodeURIComponent(key)}`;
+function safeEmail(e?: string | null): string | null {
+  if (!e) return null;
+  const s = String(e).trim().toLowerCase();
+  return /\S+@\S+\.\S+/.test(s) ? s : null;
 }
 
-async function getJSON<T = any>(key: string): Promise<T | null> {
-  const res = await fetch(buildURL(key), { credentials: "include" });
-  const text = await res.text();
-  let data: any = text ? JSON.parse(text) : null;
-  // /data returns { value?: any }
-  return data && "value" in data ? (data.value as T) : null;
+async function detectEmail(): Promise<string | null> {
+  const candidates = [
+    "/.netlify/functions/me",
+    "/.netlify/functions/user",
+    "/.netlify/functions/session",
+    "/api/me",
+  ];
+  for (const url of candidates) {
+    try {
+      const r = await fetch(url, { credentials: "include" });
+      if (!r.ok) continue;
+      const j = await r.json().catch(() => ({}));
+      const e =
+        j?.email ||
+        j?.user?.email ||
+        j?.account?.email ||
+        j?.data?.email ||
+        j?.profile?.email;
+      const ok = safeEmail(e);
+      if (ok) return ok;
+    } catch {}
+  }
+  return null;
 }
 
-async function setJSON(key: string, value: any): Promise<void> {
-  await fetch(buildURL(key), {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(value),
-  });
-}
-
-function makeId() {
+function uid(): string {
   // @ts-ignore
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+// canonical keys
+const userRoot = (email: string) => `u/${encodeURIComponent(email)}`;
+const kFarms = (email: string) => `${userRoot(email)}/farms`;
+const kCurrentFarm = (email: string) => `${userRoot(email)}/currentFarm`;
+
+// Optional: one‑time migration from legacy "default/*" buckets to the first farm
+const LEGACY_KEYS = ["morts", "feed", "water", "weights", "dailyLogs", "pickups", "reminders"];
+
+async function migrateLegacyDefaultToFarm(email: string, farmId: string) {
+  // If you never had default/* data, this is a no‑op
+  for (const key of LEGACY_KEYS) {
+    const legacy = await dataGet<any>(`default/${key}`);
+    if (legacy == null) continue;
+    await dataSet(`${userRoot(email)}/f/${farmId}/${key}`, legacy);
+    // leave legacy data in place for safety; you can delete once verified
+  }
+}
+
 export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [email, setEmail] = useState<string | null>(null);
   const [farms, setFarms] = useState<Farm[]>([]);
   const [farmId, setFarmIdState] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setErr] = useState<string | null>(null);
 
-  // Load farms from /data on mount
+  // detect email then load farms + current
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true);
-      setError(null);
+      setErr(null);
       try {
-        const list = await getJSON<Farm[]>(FARMS_KEY);
+        const e = await detectEmail();
         if (!alive) return;
-        const arr = Array.isArray(list) ? list : [];
-        setFarms(arr);
-        if (arr.length > 0 && !farmId) setFarmIdState(arr[0].id);
-      } catch (e: any) {
-        if (alive) setError(e?.message || "Failed to load farms");
+        setEmail(e);
+        if (!e) {
+          setFarms([]);
+          setFarmIdState(null);
+          return;
+        }
+        const list = (await dataGet<Farm[]>(kFarms(e))) || [];
+        const current = (await dataGet<string>(kCurrentFarm(e))) || list[0]?.id || null;
+        setFarms(list);
+        setFarmIdState(current);
+      } catch (err: any) {
+        if (alive) setErr(err?.message || "Failed to load farms");
       } finally {
         if (alive) setLoading(false);
       }
     })();
     return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Create farm + one-time migrate orphan data into the FIRST farm
+  const setFarmId = useCallback(async (id: string | null) => {
+    setFarmIdState(id);
+    if (email && id) await dataSet(kCurrentFarm(email), id);
+  }, [email]);
+
   const createFarm = useCallback(async (name: string) => {
-    setError(null);
-    const clean = String(name || "").trim();
-    if (!clean) {
-      setError("Please enter a farm name.");
-      return;
-    }
-
-    const current = (await getJSON<Farm[]>(FARMS_KEY)) ?? [];
-    const isFirst = current.length === 0;
-
-    const newFarm: Farm = { id: makeId(), name: clean };
-    const next = [...current, newFarm];
-
-    // Persist farms_list
-    await setJSON(FARMS_KEY, next);
-
-    // If this is the first farm ever, migrate orphaned buckets into it
+    const nm = String(name || "").trim();
+    if (!nm) throw new Error("Farm name required");
+    if (!email) throw new Error("Please sign in");
+    const list = (await dataGet<Farm[]>(kFarms(email))) || [];
+    const isFirst = list.length === 0;
+    const f: Farm = { id: uid(), name: nm, role: "owner" };
+    const next = [...list, f];
+    await dataSet(kFarms(email), next);
+    await dataSet(kCurrentFarm(email), f.id);
+    setFarms(next);
+    setFarmIdState(f.id);
     if (isFirst) {
-      for (const k of ORPHAN_KEYS) {
-        try {
-          const orphan = await getJSON<any>(`data/${k}`);
-          if (orphan == null) continue;
-          await setJSON(`farm/${newFarm.id}/${k}`, orphan);
-          // We keep the original orphan copy for safety; you can delete after verifying
-        } catch {
-          // do not block creation on a single key
-        }
-      }
+      // migrate legacy "default/*" buckets into this first farm (safe copy)
+      await migrateLegacyDefaultToFarm(email, f.id);
     }
+  }, [email]);
 
-    setFarms(next);
-    setFarmIdState(newFarm.id);
-  }, []);
-
-  // Delete farm
   const deleteFarm = useCallback(async (id: string) => {
-    setError(null);
-    const current = (await getJSON<Farm[]>(FARMS_KEY)) ?? [];
-    const next = current.filter((f) => f.id !== id);
-    await setJSON(FARMS_KEY, next);
+    if (!email) throw new Error("Please sign in");
+    const list = (await dataGet<Farm[]>(kFarms(email))) || [];
+    const next = list.filter(f => f.id !== id);
+    await dataSet(kFarms(email), next);
     setFarms(next);
-    if (farmId === id) setFarmIdState(next[0]?.id ?? null);
-  }, [farmId]);
+    if (farmId === id) {
+      const newId = next[0]?.id || null;
+      setFarmIdState(newId);
+      if (newId) await dataSet(kCurrentFarm(email), newId);
+    }
+    // NOTE: we do not delete the farm's data; that’s your call.
+  }, [email, farmId]);
 
-  return (
-    <FarmContext.Provider
-      value={{
-        farms,
-        farmId,
-        setFarmId: setFarmIdState,
-        createFarm,
-        deleteFarm,
-        loading,
-        error,
-      }}
-    >
-      {children}
-    </FarmContext.Provider>
-  );
+  const value = useMemo<FarmContextType>(() => ({
+    farms,
+    farmId,
+    setFarmId,
+    createFarm,
+    deleteFarm,
+    email,
+    loading,
+    error,
+  }), [farms, farmId, setFarmId, createFarm, deleteFarm, email, loading, error]);
+
+  return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
 };
 
-export const useFarm = (): FarmContextType => {
+export function useFarm(): FarmContextType {
   const ctx = useContext(FarmContext);
   if (!ctx) throw new Error("useFarm must be used within FarmProvider");
   return ctx;
-};
+}
