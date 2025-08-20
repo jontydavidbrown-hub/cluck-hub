@@ -1,7 +1,7 @@
 // src/pages/Feed.tsx
 import { useMemo, useState } from "react";
 import { useCloudSlice } from "../lib/cloudSlice";
-
+import { useFarm } from "../lib/FarmContext";
 /* ========= Types ========= */
 
 type Shed = {
